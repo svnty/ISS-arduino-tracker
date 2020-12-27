@@ -30,11 +30,11 @@ void setup() {
   delay(200);
   compass.init();
 
+  spinToAlignXYAxis();
+  spinToAlignPointer();
   getRTC();
   getGPS();
   getXYZ();
-  spinToAlignXYAxis();
-  spinToAlignZAxis();
 }
 
 void spinToAlignXYAxis() {
@@ -63,11 +63,24 @@ void spinToAlignXYAxis() {
   }
 }
 
-void spinToAlignZAxis() {
+void spinToAlignPointer() {
+  int hallEffectSensorPin = 2;
+  boolean state = 1;
+
+  pinMode(hallEffectSensorPin, INPUT);
   stepperPointer.setSpeed(10);
 
-  while (true) {
+  while (state) {
+    state = digitalRead(hallEffectSensorPin);
     stepperPointer.step(1);
+  }
+
+  if (!state) {
+    delay(200);
+    state = digitalRead(hallEffectSensorPin);
+    if (state) {
+      spinToAlignPointer();
+    }
   }
 }
 
