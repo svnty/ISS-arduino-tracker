@@ -5,7 +5,10 @@
 #include <TinyGPS++.h>
 #include <SoftwareSerial.h>
 #include <QMC5883LCompass.h>
-
+#include "sgp4ext.h"
+#include "sgp4unit.h"
+#include "sgp4io.h"
+#include "sgp4coord.h"
 
 // REAL TIME CLOCK
 tmElements_t tm;
@@ -16,8 +19,6 @@ TinyGPSPlus gps;
 
 // COMPASS
 QMC5883LCompass compass;
-int x, y, z, a, b;
-char direction[3];
 
 // STEPPER MOTOR
 Stepper stepperXYAxis(2048, 7, 9, 8, 10);
@@ -26,15 +27,23 @@ Stepper stepperPointer(2048, 3, 5, 4, 6);
 void setup() {
   Serial.begin(9600);
   while (!Serial);
-  serial_connection.begin(9600); 
+  serial_connection.begin(9600);
   delay(200);
-  compass.init();
 
-  spinToAlignXYAxis();
-  spinToAlignPointer();
+  compass.init();
+  delay(200);
+
+  Serial.println("\nInitalizing... \n");
+  //spinToAlignXYAxis();
+  //spinToAlignPointer();
   getRTC();
+  delay(200);
   getGPS();
+  delay(200);
   getXYZ();
+  delay(200);
+
+  Serial.println(tm.Hour);
 }
 
 void spinToAlignXYAxis() {
@@ -56,7 +65,7 @@ void spinToAlignXYAxis() {
     delay(200);
     resistance = analogRead(photoresistorSensorPin);
     if (resistance < threshold) {
-     digitalWrite(laserDiodePin, LOW);
+      digitalWrite(laserDiodePin, LOW);
     } else {
       spinToAlignXYAxis();
     }
@@ -85,15 +94,19 @@ void spinToAlignPointer() {
 }
 
 void getXYZ() {
+  int x, y, z, a, b;
+  char direction[3];
   compass.read();
-  
+
   x = compass.getX();
   y = compass.getY();
   z = compass.getZ();
   a = compass.getAzimuth();
   b = compass.getBearing(a);
+  Serial.println("xyz");
 
   compass.getDirection(direction, a);
+  Serial.println("direction");
 
   Serial.print("X: ");
   Serial.print(x);
@@ -132,7 +145,7 @@ void getRTC() {
       Serial.println("example to initialize the time and begin running.");
       Serial.println();
     } else {
-      Serial.println("DS1307 read error!  Please check the circuitry.");
+      Serial.println("DS1307 read error! Please check the circuitry.");
       Serial.println();
     }
   }
@@ -161,8 +174,8 @@ void getGPS() {
         Serial.println(gps.location.lng(), 6);
         Serial.println("Speed MPH:");
         Serial.println(gps.speed.mph());
-        Serial.println("Altitude Feet:");
-        Serial.println(gps.altitude.feet());
+        Serial.println("Altitude KiloMeters:");
+        Serial.println(gps.altitude.kilometers());
         Serial.println("");
         break;
       }
@@ -171,4 +184,77 @@ void getGPS() {
 }
 
 void loop() {
+  //SET UP SOME VARIABLES
+  double ro[3];
+  double vo[3];
+  double recef[3];
+  double vecef[3];
+  char typerun, typeinput, opsmode;
+  gravconsttype  whichconst;
+
+  double sec, secC, jd, jdC, tsince, startmfe, stopmfe, deltamin;
+  double tumin, mu, radiusearthkm, xke, j2, j3, j4, j3oj2;
+  double latlongh[3]; //lat, long in rad, h in km above ellipsoid
+  double siteLat, siteLon, siteAlt, siteLatRad, siteLonRad;
+  double razel[3];
+  double razelrates[3];
+  int  year; int mon; int day; int hr; int min;
+  int yearC; int monC; int dayC; int hrC; int minC;
+  typedef char str3[4];
+  str3 monstr[13];
+  elsetrec satrec;
+  double steps_per_degree = 2048/360; //Stepper motor steps per degree azimuth
+  float elevation;
+  
+  //VARIABLES FOR STEPPER CALCULATIONS
+  float azimuth; //-180 to 0 to 180
+  float prevAzimuth;
+  float cAzimuth; //From 0 to 359.99
+  float prevcAzimuth;
+  bool stepperRelative = 0; //Has the stepper direction been initialized?
+  float azimuthDatum = 0;
+  int stepsFromDatum = 0;
+  int stepsNext = 0;
+  int dirNext = 1;
+  int totalSteps = 0;
+  int prevDir = 3; //Initialize at 3 to indicate that there is no previous direction yet (you can't have a "previous direction" until the third step)
+  double azError = 0;
+
+  //SET VARIABLES
+  opsmode = 'i';
+  typerun = 'c';
+  typeinput = 'e';
+  whichconst = wgs72;
+  getgravconst(whichconst, tumin, mu, radiusearthkm, xke, j2, j3, j4, j3oj2);
+  strcpy(monstr[1], "Jan");
+  strcpy(monstr[2], "Feb");
+  strcpy(monstr[3], "Mar");
+  strcpy(monstr[4], "Apr");
+  strcpy(monstr[5], "May");
+  strcpy(monstr[6], "Jun");
+  strcpy(monstr[7], "Jul");
+  strcpy(monstr[8], "Aug");
+  strcpy(monstr[9], "Sep");
+  strcpy(monstr[10], "Oct");
+  strcpy(monstr[11], "Nov");
+  strcpy(monstr[12], "Dec");
+
+  //ENTER TWO-LINE ELEMENT HERE
+  char longstr1[] = "1 25544U 98067A   15239.40934558  .00012538  00000-0  18683-3 0  9996";
+  char longstr2[] = "2 25544  51.6452  88.4122 0001595  95.9665 324.8493 15.55497522959124";
+
+  siteLat = gps.location.lat();
+  siteLon = gps.location.lng();
+  siteAlt = gps.altitude.kilometers();
+  siteLatRad = siteLat * pi / 180.0;
+  siteLonRad = siteLon * pi / 180.0;
+
+  // INITIALIZE SATELLITE TRACKING    
+  twoline2rv(longstr1, longstr2, typerun, typeinput, opsmode, whichconst, startmfe, stopmfe, deltamin, satrec);
+  // Call propogator to get initial state vector value
+  sgp4(whichconst, satrec, 0.0, ro, vo);
+  jd = satrec.jdsatepoch;    
+  invjday(jd, year, mon, day, hr, min, sec);
+  //jdC = getJulianFromUnix();
+  invjday( jdC, yearC, monC, dayC, hrC, minC, secC);
 }
