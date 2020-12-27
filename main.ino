@@ -1,87 +1,105 @@
-#include <CheapStepper.h>
 #include <Wire.h>
 #include <TimeLib.h>
+#include <Stepper.h>
 #include <DS1307RTC.h>
 #include <TinyGPS++.h>
 #include <SoftwareSerial.h>
 #include <QMC5883LCompass.h>
 
+
 // REAL TIME CLOCK
 tmElements_t tm;
 
-// GPS MODULE 
-SoftwareSerial serial_connection(12, 13); // RX=pin 12, TX=pin 13
-TinyGPSPlus gps; //This is the GPS object with the NMEA data
+// GPS MODULE
+SoftwareSerial serial_connection(12, 13); // (RX, TX)
+TinyGPSPlus gps;
 
 // COMPASS
 QMC5883LCompass compass;
+int x, y, z, a, b;
+char direction[3];
 
 // STEPPER MOTOR
-//CheapStepper stepperOne (7,8,9,10);
-//CheapStepper stepperTwo (2,3,4,5);
-//bool stepperOneClockwise = true;
-//bool stepperTwoClockwise = false;
+Stepper stepperXYAxis(2048, 7, 9, 8, 10);
+Stepper stepperPointer(2048, 3, 5, 4, 6);
 
 void setup() {
   Serial.begin(9600);
-  while (!Serial) ; // wait for serial
-  serial_connection.begin(9600);//This opens up communications to the GPS
+  while (!Serial);
+  serial_connection.begin(9600); 
   delay(200);
-
   compass.init();
 
   getRTC();
   getGPS();
   getXYZ();
+  spinToAlignXYAxis();
+  spinToAlignZAxis();
+}
 
-  /*
-  stepperOne.setRpm(16);
-  stepperTwo.setRpm(16);
-  Serial.begin(9600);
-  stepperOne.newMoveToDegree(stepperOneClockwise, 360);
-  */
+void spinToAlignXYAxis() {
+  int photoresistorSensorPin = A0;
+  int laserDiodePin = 11;
+  int threshold = 100;
+  int resistance = 0;
+
+  stepperXYAxis.setSpeed(10);
+  pinMode(laserDiodePin, OUTPUT);
+  digitalWrite(laserDiodePin, HIGH);
+
+  while (resistance > threshold) {
+    resistance = analogRead(photoresistorSensorPin);
+    stepperXYAxis.step(1);
+  }
+
+  if (resistance < threshold) {
+    delay(200);
+    resistance = analogRead(photoresistorSensorPin);
+    if (resistance < threshold) {
+     digitalWrite(laserDiodePin, LOW);
+    } else {
+      spinToAlignXYAxis();
+    }
+  }
+}
+
+void spinToAlignZAxis() {
+  stepperPointer.setSpeed(10);
+
+  while (true) {
+    stepperPointer.step(1);
+  }
 }
 
 void getXYZ() {
-  int x, y, z, a, b;
-  char myArray[3];
-  
   compass.read();
-
+  
   x = compass.getX();
   y = compass.getY();
   z = compass.getZ();
-  
   a = compass.getAzimuth();
-  
   b = compass.getBearing(a);
 
-  compass.getDirection(myArray, a);
-  
-  
+  compass.getDirection(direction, a);
+
   Serial.print("X: ");
   Serial.print(x);
-
   Serial.print(" Y: ");
   Serial.print(y);
-
   Serial.print(" Z: ");
   Serial.print(z);
-
   Serial.print(" Azimuth: ");
   Serial.print(a);
-
   Serial.print(" Bearing: ");
   Serial.print(b);
-
   Serial.print(" Direction: ");
-  Serial.print(myArray[0]);
-  Serial.print(myArray[1]);
-  Serial.print(myArray[2]);
+  Serial.print(direction[0]);
+  Serial.print(direction[1]);
+  Serial.print(direction[2]);
 }
 
 void getRTC() {
-    if (RTC.read(tm)) {
+  if (RTC.read(tm)) {
     Serial.print("Ok, Time = ");
     print2digits(tm.Hour);
     Serial.write(':');
@@ -107,17 +125,21 @@ void getRTC() {
   }
 }
 
+void print2digits(int number) {
+  if (number >= 0 && number < 10) {
+    Serial.write('0');
+  }
+  Serial.print(number);
+}
+
 void getGPS() {
   Serial.println("\nGPS initializing\n");
   while (true) {
-    while(serial_connection.available()) {
-      // This feeds the serial NMEA data into the library one char at a time
+    while (serial_connection.available()) {
       gps.encode(serial_connection.read());
     }
-    // Get the latest info from the gps object which it derived from the data sent by the GPS unit
-    if(gps.location.isUpdated()) {
-      // Confirm accuracy
-      if (gps.satellites.value() > 1){
+    if (gps.location.isUpdated()) {
+      if (gps.satellites.value() > 1) {
         Serial.println("Satellite Count:");
         Serial.println(gps.satellites.value());
         Serial.println("Latitude:");
@@ -129,34 +151,11 @@ void getGPS() {
         Serial.println("Altitude Feet:");
         Serial.println(gps.altitude.feet());
         Serial.println("");
-        break; 
+        break;
       }
     }
   }
 }
 
 void loop() {
-  /*
-  stepperOne.run();
-  stepperTwo.run();
-  int stepperOneStepsLeft = stepperOne.getStepsLeft();
-  int stepperTwoStepsLeft = stepperTwo.getStepsLeft();
-
-  if (stepperOneStepsLeft == 0){
-    // stepperOneClockwise = !stepperOneClockwise;
-    stepperOne.newMoveDegrees(stepperOneClockwise, 360);
-  }
-
-  if (stepperTwoStepsLeft == 0) {
-    // stepperTwoClockwise = !stepperTwoClockwise;
-    stepperTwo.newMoveDegrees(stepperTwoClockwise, 180);
-  }
-  */
-}
-
-void print2digits(int number) {
-  if (number >= 0 && number < 10) {
-    Serial.write('0');
-  }
-  Serial.print(number);
 }
