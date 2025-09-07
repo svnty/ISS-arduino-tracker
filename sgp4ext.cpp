@@ -25,8 +25,10 @@
 
 #include "sgp4ext.h"
 
-double asinh(double z) {
-  return log((z + sqrt(1 + pow(z, 2))));
+#include <math.h>
+
+double asinh(double x) {
+    return log(x + sqrt(x * x + 1.0));
 }
 
 double  sgn

@@ -7,9 +7,11 @@ and Applications" by David Vallado (2007). (w) 719-573-2600, email dvallado@agi.
 
 Ported to C++ by Grady Hillhouse with some modifications, July 2015.
 */
-#define abs(x) ((x)>0?(x):-(x))
 #include "sgp4coord.h"
 #include "sgp4ext.h"
+
+#include <math.h>
+
 
 /*
 teme2ecef
@@ -154,7 +156,7 @@ void ijk2ll(double r[3], double latlongh[3])
     magr = mag(r);
     temp = sqrt(r[0]*r[0] + r[1]*r[1]);
  
-    if(abs(temp) < small)
+    if(fabs(temp) < small)
     {
         rtasc = sgn(r[2]) * pi * 0.5;
     }
@@ -165,7 +167,7 @@ void ijk2ll(double r[3], double latlongh[3])
     
     latlongh[1] = rtasc;
     
-    if (abs(latlongh[1]) >= pi)
+    if (fabs(latlongh[1]) >= pi)
     {
         if (latlongh[1] < 0.0)
         {
@@ -184,7 +186,7 @@ void ijk2ll(double r[3], double latlongh[3])
     double olddelta = latlongh[0] + 10.0;
     double sintemp, c = 0;
     
-    while ( (abs(olddelta - latlongh[0]) >= small) && (i < 10) )
+    while ( (fabs(olddelta - latlongh[0]) >= small) && (i < 10) )
     {
         olddelta = latlongh[0];
         sintemp = sin(latlongh[0]);
@@ -193,7 +195,7 @@ void ijk2ll(double r[3], double latlongh[3])
         i++;
     }
     
-    if (0.5*pi - abs(latlongh[0]) > pi/180.0)
+    if (0.5*pi - fabs(latlongh[0]) > pi/180.0)
     {
         latlongh[2] = (temp/cos(latlongh[0])) - c;
     }
@@ -326,7 +328,7 @@ void rv2azel(double ro[3], double vo[3], double latgd, double lon, double alt, d
     //Calculate rates for range, azimuth, and elevation
     drho = dot(rhosez,drhosez) / rho;
     
-    if(abs(temp*temp) > small)
+    if(fabs(temp*temp) > small)
     {
         daz = (drhosez[0]*rhosez[1] - drhosez[1]*rhosez[0]) / (temp * temp);
     }
@@ -335,7 +337,7 @@ void rv2azel(double ro[3], double vo[3], double latgd, double lon, double alt, d
         daz = 0.0;
     }
     
-    if(abs(temp) > small)
+    if(fabs(temp) > small)
     {
         del = (drhosez[2] - drho*sin(el)) / temp;
     }

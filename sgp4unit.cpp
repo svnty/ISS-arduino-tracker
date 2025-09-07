@@ -51,6 +51,8 @@
 
 #include "sgp4unit.h"
 
+#include <math.h>
+
 //const char help = 'n'; //Not sure what this does. Commented out. - Grady Hillhouse 2015
 //FILE *dbgfile;
 
