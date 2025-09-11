@@ -1,0 +1,8 @@
+{
+    "port": "/dev/tty.usbserial-10",
+    "board": "arduino:avr:mega",
+    "sketch": "ISS-arduino-tracker.ino",
+    "output": "build",
+    "intelliSenseGen": "global",
+    "programmer": "avrisp"
+}
