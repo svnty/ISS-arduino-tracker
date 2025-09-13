@@ -2,13 +2,11 @@
 #include <ArduinoJson.h>
 // #include <AS5600.h>
 #include <LiquidCrystal_I2C.h>
-#include <PWMServo.h>
 #include <QMC5883LCompass.h>
 #include <Servo.h>
-#include <SoftwareSerial.h>
 #include <TMCStepper.h>
 #include <TinyGPSPlus.h>
-#include <WiFiEspAT.h>
+#include <WiFiS3.h>
 
 #include "SGP4_vallado/sgp4coord.cpp"
 #include "SGP4_vallado/sgp4coord.h"
@@ -20,36 +18,37 @@
 // -------- SYSTEM TOGGLES --------
 static const bool ENABLE_WIFI = true;
 static const bool ENABLE_LOG = true;
-static const bool ENABLE_GPS = false;
+static const bool ENABLE_GPS = true;
 
 // -------- CONSTANTS --------
-static const uint8_t AZIMUTH_DIR_PIN = 22;
-static const uint8_t AZIMUTH_STEP_PIN = 23;
+static const uint8_t ELEVATION_PIN = 9;
+static const uint8_t AZIMUTH_DIR_PIN = 10;
+static const uint8_t AZIMUTH_STEP_PIN = 11;
 static const uint8_t GPS_RX_PIN = 12;
-static const float TMC2209_RESISTANCE = 0.11;
+static const float TMC2209_RESISTANCE = 0.11; //ohms
 static const char *WIFI_SSID = "Jakes iPhone", *WIFI_PASSWORD = "izeh5zemxa05r";
 static const double DEG_2_RAD = pi / 180.0;
 static const double RAD_2_DEG = 180.0 / pi;
-static const int ELEVATION_PIN = SERVO_PIN_C;
-static const float DEFAULT_DECLINATION = 0.0;  // Update this with your local magnetic declination as fallback
-static const char* DECLINATION_HOST = "www.ngdc.noaa.gov";
-static const char* DECLINATION_API_KEY = "zNEw7";
-static const char* TLE_API_HOST = "celestrak.com";
+static const char *DECLINATION_HOST = "www.ngdc.noaa.gov";
+static const char *DECLINATION_API_KEY = "zNEw7";
+static const char *TLE_API_HOST = "celestrak.org";
+static const int PORT = 443;
 
 // -------- VARIABLES --------
 // timers
 static unsigned long currentTime = 0;
 static unsigned long lastLcdUpdateTime = 1000;
 static unsigned long lastDeclinationUpdateTime = 0;
-static unsigned long wifiTimeout = 10000;
 static unsigned long lastWiFiReconnectAttempt = 0;
 static unsigned long wifiReconnectInterval = 5000;
 // http data
 static bool foundISSbyWifi = false;
+static uint8_t findISSbyWifiAttempts = 0;
+static bool foundDeclinationByWifi = false;
+static uint8_t findDeclinationByWifiAttempts = 0;
 static float magneticDeclination = 0.0;
 static char tle_line1[70];
 static char tle_line2[70];
-static bool tleParsed = false;
 // gps data
 static double observerLatitude = 0.0, observerLongitude = 0.0, observerAltitude = 0.0;
 static int year, month, day, hour, minute, second;
@@ -58,12 +57,11 @@ static int8_t direction = 1;
 // motor control
 static float currentAzimuth = 0.0;
 static float currentElevation = 90.0;                                  // Start at horizon
-static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0;  // 200 steps * 16 microsteps / 360 degrees
+static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0 * 61.0/15.0;  // 200 steps * 16 microsteps / 360 degrees * gear ratio (61/15)
 
 // -------- SERIALS --------
 #define AZIMUTH_SERIAL Serial1
-#define WIFI_SERIAL Serial3
-static SoftwareSerial GPS_SERIAL(GPS_RX_PIN, -1);
+#define GPS_SERIAL Serial2
 
 // -------- OBJECTS --------
 TinyGPSPlus gps;
@@ -72,7 +70,7 @@ TMC2209Stepper azimuthDriver(&AZIMUTH_SERIAL, TMC2209_RESISTANCE, 0);
 // AS5600 as5600;
 QMC5883LCompass compass;
 elsetrec satrec;
-PWMServo elevation;
+Servo elevation;
 WiFiSSLClient sslClient;
 
 // -------- FUNCTIONS --------
@@ -105,9 +103,9 @@ void makeTleApiRequest() {
   Serial.print("Connecting to ");
   Serial.print(TLE_API_HOST);
   Serial.print(":");
-  Serial.println(443);
+  Serial.println(PORT);
 
-  if (!client.connect(TLE_API_HOST, 443)) {
+  if (!client.connect(TLE_API_HOST, PORT)) {
     Serial.println("Connection to server failed!");
     lcdSetSecondLine("TLE ERROR");
     delay(2000);
@@ -116,8 +114,8 @@ void makeTleApiRequest() {
 
   Serial.println("Connected to server");
 
-  String request = "GET " + String("/NORAD/elements/stations.txt") + " HTTP/1.1\r\n";
-  request += "Host: " + String(DECLINATION_HOST) + "\r\n";
+  String request = "GET " + String("/NORAD/elements/gp.php?GROUP=stations") + " HTTP/1.1\r\n";
+  request += "Host: " + String(TLE_API_HOST) + "\r\n";
   request += "User-Agent: Arduino/1.0\r\n";
   request += "Cache-Control: no-cache\r\n";
   request += "Connection: close\r\n";
@@ -160,52 +158,55 @@ void makeTleApiRequest() {
   client.stop();
   Serial.println("Connection closed");
 
+  int issIndex = httpResponse.indexOf("ISS (ZARYA)");
+  if (httpResponse.isEmpty() == false && issIndex >= 0) {
+    foundISSbyWifi = true;
+    Serial.println(httpResponse);
+    parseTLEData(httpResponse, issIndex);
+  }
+
   if (!foundISSbyWifi) {
     lcdSetSecondLine("TLE ERROR");
+    Serial.println("No valid TLE data received!");
+    return;
+  }
+}
+
+void parseTLEData(String data, int issIndex) {
+  Serial.println("Parsing TLE data...");
+
+  Serial.println("Found ISS (ZARYA) data!");
+
+  // Find the first TLE line (starts with "1 25544")
+  int line1Index = data.indexOf("1 25544", issIndex);
+  if (line1Index == -1) {
+    Serial.println("TLE Line 1 not found!");
     return;
   }
 
-  parseTLEData(httpResponse);
-}
-
-void parseTLEData(String data) {
-  Serial.println("Parsing TLE data...");
-
-  int lineCount = 0;
-  int startIndex = 0;
-  String lines[100];
-
-  while (startIndex < data.length() && lineCount < 100) {
-    int endIndex = data.indexOf('\n', startIndex);
-    if (endIndex == -1) {
-      endIndex = data.length();
-    }
-
-    String line = data.substring(startIndex, endIndex);
-    line.trim();
-
-    if (line.length() > 0) {
-      lines[lineCount] = line;
-      lineCount++;
-    }
-
-    startIndex = endIndex + 1;
+  // Find the second TLE line (starts with "2 25544")
+  int line2Index = data.indexOf("2 25544", line1Index);
+  if (line2Index == -1) {
+    Serial.println("TLE Line 2 not found!");
+    return;
   }
 
-  // Look for ISS (ZARYA) and parse its TLE data
-  for (int i = 0; i < lineCount - 2; i++) {
-    if (lines[i].indexOf("ISS (ZARYA)") >= 0) {
-      Serial.println("Found ISS (ZARYA) data!");
+  // Extract Line 1 (69 characters for standard TLE format)
+  String line1 = data.substring(line1Index, line1Index + 69);
+  line1.trim();
 
-      strcpy(tle_line1, lines[i + 1].c_str());
-      strcpy(tle_line2, lines[i + 2].c_str());
+  // Extract Line 2 (69 characters for standard TLE format)
+  String line2 = data.substring(line2Index, line2Index + 69);
+  line2.trim();
 
-      Serial.println("TLE data parsed successfully!");
-      lcdSetSecondLine("TLE OK");
-      foundISSbyWifi = true;
-      break;
-    }
-  }
+  // Copy to global variables
+  strcpy(tle_line1, line1.c_str());
+  strcpy(tle_line2, line2.c_str());
+
+  Serial.println("TLE Line 1: " + line1);
+  Serial.println("TLE Line 2: " + line2);
+  Serial.println("TLE data parsed successfully!");
+  lcdSetSecondLine("TLE OK");
 }
 
 void makeDeclinationApiRequest() {
@@ -216,9 +217,9 @@ void makeDeclinationApiRequest() {
   Serial.print("Connecting to ");
   Serial.print(DECLINATION_HOST);
   Serial.print(":");
-  Serial.println(443);
+  Serial.println(PORT);
 
-  if (!client.connect(DECLINATION_HOST, 443)) {
+  if (!client.connect(DECLINATION_HOST, PORT)) {
     Serial.println("Connection to server failed!");
     lcdSetSecondLine("DECLINATION ERROR");
     delay(2000);
@@ -277,6 +278,10 @@ void makeDeclinationApiRequest() {
   if (jsonResponse.length() == 0) {
     Serial.println("No response body received!");
     return;
+  } else {
+    // assuming the data is valid if we got something
+    // todo: improve this check
+    foundDeclinationByWifi = true;
   }
 
   parseDeclinationJsonResponse(jsonResponse);
@@ -328,35 +333,21 @@ void parseDeclinationJsonResponse(String jsonString) {
       JsonObject result = results[0];
 
       if (!result["declination"].isNull()) {
-        float declination = result["declination"];
-        Serial.print("Magnetic Declination: ");
-        Serial.print(declination, 5);
-        Serial.println("°");
-      }
-    }
-  }
-
-  storeDeclinationDataForUse(doc);
-}
-
-void storeDeclinationDataForUse(JsonDocument& doc) {
-  if (doc["result"].is<JsonArray>()) {
-    JsonArray results = doc["result"];
-    if (results.size() > 0) {
-      JsonObject result = results[0];
-
-      if (!result["declination"].isNull()) {
         magneticDeclination = result["declination"];
+        foundDeclinationByWifi = true;
         lcdSetSecondLine("DECLINATION OK");
-        delay(2000);
+        Serial.print("Magnetic Declination: ");
+        Serial.print(magneticDeclination, 5);
+        Serial.println("°");
+        lastDeclinationUpdateTime = millis();
       }
     }
+  } else {
+    Serial.println("Unexpected JSON structure: 'result' is not an array");
   }
-
-  lastDeclinationUpdateTime = millis();
 }
 
-void parseISSTLE(const char* line1, const char* line2, elsetrec& satrec) {
+void parseISSTLE(const char *line1, const char *line2, elsetrec &satrec) {
   char temp[20];
 
   // Line 1 parsing
@@ -429,58 +420,23 @@ void parseISSTLE(const char* line1, const char* line2, elsetrec& satrec) {
   jday(year, mon, day, hr, minute, sec, satrec.jdsatepoch);
 }
 
-void homeAzimuthToTrueNorth() {
-  lcdSetFirstLine("CALIBRATING");
-  lcdSetSecondLine("AZIMUTH");
-
-  compass.read();
-  float magneticHeading = compass.getAzimuth();
-
-  // Calculate true heading by applying declination correction
-  float trueHeading = magneticHeading + magneticDeclination;
-
-  // Normalize to 0-360 degrees
-  if (trueHeading < 0) trueHeading += 360;
-  if (trueHeading >= 360) trueHeading -= 360;
-
-  // Now rotate until we're pointing at true north (0 degrees)
-  // The stepper motor should move the difference between current true heading and 0
-  float angleToRotate = -trueHeading;  // Negative because we want to go to 0
-
-  // Convert angle to steps (assuming 200 steps per revolution * 16 microsteps)
-  long stepsToMove = (angleToRotate * (200 * 16)) / 360;
-
-  // Move the stepper motor
-  for (long i = 0; i < abs(stepsToMove); i++) {
-    digitalWrite(AZIMUTH_DIR_PIN, stepsToMove > 0 ? HIGH : LOW);
-    digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-    delayMicroseconds(100);
-    digitalWrite(AZIMUTH_STEP_PIN, LOW);
-    delayMicroseconds(100);
-  }
-
-  lcdSetFirstLine("OK");
-  delay(2000);
-}
-
 void connectToWiFi() {
   Serial.print("Connecting to WiFi network: ");
   Serial.println(WIFI_SSID);
+  WiFi.disconnect();
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.print(".");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.println("WiFi connected!");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Signal strength (RSSI): ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+    lcdSetSecondLine("OK");
   }
-
-  Serial.println();
-  Serial.println("WiFi connected!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("Signal strength (RSSI): ");
-  Serial.print(WiFi.RSSI());
-  Serial.println(" dBm");
 }
 
 void moveAzimuthTo(float targetAzimuth) {
@@ -553,10 +509,14 @@ void moveElevationTo(float targetElevation) {
 void setup() {
   Serial.begin(115200);
 
+  pinMode(AZIMUTH_STEP_PIN, OUTPUT);
+  pinMode(AZIMUTH_DIR_PIN, OUTPUT);
+  digitalWrite(AZIMUTH_DIR_PIN, HIGH);
+
   // LCD Initialization
   lcd.init();
   lcd.backlight();
-  lcdSetFirstLine("MEGA2560 INIT");
+  lcdSetFirstLine("ARDUINO INIT");
   delay(1000);
 
   // GPS Initialization
@@ -624,67 +584,102 @@ void setup() {
 
   // WiFi Initialization
   if (ENABLE_WIFI) {
-    WIFI_SERIAL.begin(115200);
-    WiFi.init(&WIFI_SERIAL);
     lcdSetFirstLine("WIFI INIT");
     connectToWiFi();
+    lastWiFiReconnectAttempt = millis();
+    while (millis() - lastWiFiReconnectAttempt < 10000) {
+      delay(1);
+      if (WiFi.status() == WL_CONNECTED) {
+        break;
+      }
+    }
+    int wifiReconnectAttempts = 0;
 
-    if (WiFi.status() != WL_CONNECTED) {
-      if (millis() - lastWiFiReconnectAttempt > wifiReconnectInterval) {
-        connectToWiFi();
+    while (WiFi.status() != WL_CONNECTED) {
+      wifiReconnectAttempts++;
+      lcdSetSecondLine("ATTEMPT " + String(wifiReconnectAttempts));
+      connectToWiFi();
+      lastWiFiReconnectAttempt = millis();
+      while (millis() - lastWiFiReconnectAttempt < 15000) {
+        delay(1);
+        if (WiFi.status() == WL_CONNECTED) {
+          break;
+        }
+      }
+      if (wifiReconnectAttempts >= 3) {
+        lcdSetSecondLine("ERROR");
+        break;
       }
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-      lcdSetFirstLine("FETCH HTTP DATA");
-      lcdSetSecondLine("ISS TLE");
-      makeTleApiRequest();
+      lcdSetSecondLine("FETCH ISS TLE");
+      while (!foundISSbyWifi && findISSbyWifiAttempts < 3) {
+        findISSbyWifiAttempts++;
+        makeTleApiRequest();
+      }
+      delay(2000);
 
-      lcdSetSecondLine("DECLINATION");
-      makeDeclinationApiRequest();
+      lcdSetSecondLine("FETCH DECLINATION");
+      while (!foundDeclinationByWifi && findDeclinationByWifiAttempts < 3) {
+        findDeclinationByWifiAttempts++;
+        makeDeclinationApiRequest();
+      }
+      delay(2000);
     } else {
       lcdSetSecondLine("ERROR");
     }
+    WiFi.disconnect();
   }
-  delay(5000);
+  if (!foundISSbyWifi) {
+    strcpy(tle_line1, "1 25544U 98067A   25249.87397102  .00012937  00000+0  23296-3 0  9995");
+    strcpy(tle_line2, "2 25544  51.6325 262.1963 0004212 309.4705  50.5911 15.50156361527839");
+  }
+  parseISSTLE(tle_line1, tle_line2, satrec);
   lcdClear();
-
-  // Azimuth Motor Initialization
-  pinMode(AZIMUTH_STEP_PIN, OUTPUT);
-  pinMode(AZIMUTH_DIR_PIN, OUTPUT);
-  digitalWrite(AZIMUTH_DIR_PIN, HIGH);
-  AZIMUTH_SERIAL.begin(115200);
-  azimuthDriver.begin();
-  azimuthDriver.rms_current(900);
-  azimuthDriver.microsteps(16);
-  azimuthDriver.pwm_autoscale(true);
-
+  
+  // Ensure motor is disabled after configuration
   // Elevation Motor Initialization
   elevation.attach(ELEVATION_PIN);
-  elevation.write(90);  // Start at horizon position
-  currentElevation = 90.0;
+  elevation.write(0);
+  currentElevation = 0;
 
   // Magnometer Initialization
   lcdSetFirstLine("QMC5883L INIT");
   compass.init();
   delay(2000);
 
-  homeAzimuthToTrueNorth();
-  lcdClear();
+  lcdSetFirstLine("CALIBRATING");
+  lcdSetSecondLine("AZIMUTH");
 
-  if (!foundISSbyWifi) {
-    strcpy(tle_line1, "1 25544U 98067A   25249.87397102  .00012937  00000+0  23296-3 0  9995");
-    strcpy(tle_line2, "2 25544  51.6325 262.1963 0004212 309.4705  50.5911 15.50156361527839");
+  while (true) {
+    compass.read();
+    float magneticHeading = compass.getAzimuth();
+    float trueHeading = magneticHeading + magneticDeclination;
+    if (trueHeading < 0) trueHeading += 360;
+    if (trueHeading >= 360) trueHeading -= 360;
+    
+    Serial.print("True heading: ");
+    Serial.println(trueHeading);
+
+    digitalWrite(AZIMUTH_STEP_PIN, HIGH);
+    delayMicroseconds(1000);
+    digitalWrite(AZIMUTH_STEP_PIN, LOW);
+    delayMicroseconds(1000);
+
+    if (abs(trueHeading) <= 0.5 || abs(trueHeading) >= 359.5) {
+      break;
+    }
   }
+
+  lcdSetSecondLine("OK");
+  delay(2000);
+
+  lcdClear();
 }
 
 void loop() {
   currentTime = millis();
-
-  if (!tleParsed) {
-    parseISSTLE(tle_line1, tle_line2, satrec);
-    tleParsed = true;
-  }
 
   double jdnow;
   jday(year, month, day, hour, minute, second, jdnow);
@@ -710,7 +705,7 @@ void loop() {
   }
 
   // Update LCD less frequently to reduce I2C interference
-  if (currentTime - lastLcdUpdateTime >= 2000) {  // Every 2 seconds instead of 1
+  if (currentTime - lastLcdUpdateTime >= 2000) {
     if (elevation_deg > 0) {
       ISSIsVisible = true;
       lcdSetFirstLine("ISS:");
@@ -727,6 +722,7 @@ void loop() {
     lastLcdUpdateTime = currentTime;
   }
 
-  moveAzimuthTo((float)azimuth_deg);
+  // moveAzimuthTo((float)azimuth_deg);
   moveElevationTo((float)elevation_deg);
+  moveAzimuthTo((float)azimuth_deg);
 }

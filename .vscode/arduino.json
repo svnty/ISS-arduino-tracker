@@ -1,8 +1,8 @@
 {
-    "port": "/dev/tty.usbserial-10",
-    "board": "arduino:avr:mega",
+    "board": "arduino:renesas_uno:unor4wifi",
     "sketch": "ISS-arduino-tracker.ino",
     "output": "build",
     "intelliSenseGen": "global",
-    "programmer": "avrisp"
+    "programmer": "cmsis-dap",
+    "port": "/dev/tty.usbmodemB43A45B4DCB42"
 }
