@@ -59,12 +59,13 @@ static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0 * 61.0/15.0
 // compass monitoring
 static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
-static const float COMPASS_JUMP_THRESHOLD = 10.0;  // degrees
-static const unsigned long COMPASS_CHECK_INTERVAL = 3000;  // ms
+static unsigned long compassLastCalibrate = 0;
+static const float COMPASS_JUMP_THRESHOLD = 5.0;  // degrees - balanced threshold
+static const unsigned long COMPASS_CHECK_INTERVAL = 5000;  // ms - increased interval
+
 
 // -------- SERIALS --------
-#define AZIMUTH_SERIAL Serial1
-#define GPS_SERIAL Serial2
+#define GPS_SERIAL Serial1
 
 // -------- OBJECTS --------
 TinyGPSPlus gps;
@@ -442,10 +443,13 @@ void connectToWiFi() {
 
 float getCompassHeading() {
   compass.read();
-  float magneticHeading = compass.getAzimuth();
-  float trueHeading = magneticHeading + magneticDeclination;
+  float reading =  compass.getAzimuth();
+  
+  float trueHeading = reading + magneticDeclination;
+
   if (trueHeading < 0) trueHeading += 360;
   if (trueHeading >= 360) trueHeading -= 360;
+
   return trueHeading;
 }
 
@@ -461,23 +465,22 @@ float calculateAngleDifference(float angle1, float angle2) {
 }
 
 void recalibrateCompass() {
-  Serial.println("Recalibrating...");
-  
   lcdSetFirstLine("CALIBRATING");
   lcdSetSecondLine("AZIMUTH");
   
   // Rotate until we're pointing north again
   while (true) {
     float currentHeading = getCompassHeading();
+    previousCompassHeading = currentHeading;
     
-    Serial.print("Recalibrating - Current heading: ");
+    Serial.print("Calibrating - Current heading: ");
     Serial.println(currentHeading);
     
     // Check if we're close to north (0 degrees)
     if (abs(currentHeading) <= 0.5 || abs(currentHeading) >= 359.5) {
       break;
     }
-    
+
     // Step the motor towards north
     digitalWrite(AZIMUTH_STEP_PIN, HIGH);
     delayMicroseconds(1000);
@@ -487,8 +490,8 @@ void recalibrateCompass() {
   
   // Reset our azimuth position tracking
   currentAzimuth = 0.0;
-  previousCompassHeading = getCompassHeading();
-  
+  compassLastCalibrate = currentTime;
+
   lcdSetSecondLine("OK");
   delay(2000);
   
@@ -496,30 +499,26 @@ void recalibrateCompass() {
 }
 
 bool checkForCompassJump() {
+  float currentHeading = getCompassHeading();
+  Serial.print("Current compass heading: ");
+  Serial.println(currentHeading);
+  Serial.print("Previous compass heading: ");
+  Serial.println(previousCompassHeading);
+
+  if (currentTime - compassLastCalibrate < 10000) {
+    Serial.println("Skipping jump check - within 10s of calibration");
+    previousCompassHeading = currentHeading;
+    return false;
+  }
+
   if (currentTime - lastCompassCheckTime >= COMPASS_CHECK_INTERVAL) {
-    float currentHeading = getCompassHeading();
-    
-    // Calculate the difference between current and previous heading
-    float headingDifference = calculateAngleDifference(previousCompassHeading, currentHeading);
-    
-    // Check if the difference exceeds our threshold
-    if (headingDifference > COMPASS_JUMP_THRESHOLD) {
-      Serial.print("Compass jump detected! Previous: ");
-      Serial.print(previousCompassHeading);
-      Serial.print("°, Current: ");
-      Serial.print(currentHeading);
-      Serial.print("°, Difference: ");
-      Serial.print(headingDifference);
-      Serial.println("°");
-      
+    lastCompassCheckTime = currentTime;
+    if (abs(calculateAngleDifference(currentHeading, previousCompassHeading)) >= COMPASS_JUMP_THRESHOLD) {
+      previousCompassHeading = currentHeading;
       return true;
     }
-    
-    // Update previous heading and timestamp
-    previousCompassHeading = currentHeading;
-    lastCompassCheckTime = currentTime;
   }
-  
+
   return false;
 }
 
@@ -551,6 +550,9 @@ void moveAzimuthTo(float targetAzimuth) {
 
     // Update current position
     currentAzimuth = targetAzimuth;
+    float currentHeading = getCompassHeading();
+    previousCompassHeading = currentHeading;
+    compassLastCalibrate = currentTime;
 
     // Normalize to 0-360 range
     if (currentAzimuth < 0) currentAzimuth += 360;
@@ -606,11 +608,14 @@ void setup() {
   // GPS Initialization
   lcdSetFirstLine("GPS INIT");
   if (ENABLE_GPS) {
+    Serial.println("Initializing GPS...");
     GPS_SERIAL.begin(9600);
     unsigned long gpsTimeoutTimer = millis();
+
     while (!gps.location.isValid()) {
-      if (currentTime - gpsTimeoutTimer > 30000) {
-        lcdSetSecondLine("ERROR");
+      if (millis() - gpsTimeoutTimer > 30000) {
+        lcdSetSecondLine("TIMEOUT");
+        delay(2000);
         break;
       }
       while (GPS_SERIAL.available()) {
@@ -621,12 +626,15 @@ void setup() {
         gps.encode(c);
       }
     }
-    lcdSetSecondLine("LOCATION OK");
-    delay(1000);
+    if (gps.location.isValid()) {
+      lcdSetSecondLine("LOCATION OK");
+      delay(2000);
+    }
 
     while (!gps.date.isValid()) {
-      if (currentTime - gpsTimeoutTimer > 30000) {
-        lcdSetSecondLine("ERROR");
+      if (millis() - gpsTimeoutTimer > 30000) {
+        lcdSetSecondLine("TIMEOUT");
+        delay(2000);
         break;
       }
       while (GPS_SERIAL.available()) {
@@ -637,8 +645,10 @@ void setup() {
         gps.encode(c);
       }
     }
-    lcdSetSecondLine("DATE OK");
-    delay(1000);
+    if (gps.date.isValid()) {
+      lcdSetSecondLine("DATE OK");
+      delay(2000);
+    }
 
     year = gps.date.year();
     month = gps.date.month();
@@ -649,8 +659,35 @@ void setup() {
     observerLatitude = gps.location.lat();
     observerLongitude = gps.location.lng();
     observerAltitude = gps.altitude.kilometers();
+
+    if (ENABLE_LOG) {
+      Serial.print("GPS Date: ");
+      Serial.print(year);
+      Serial.print("-");
+      Serial.print(month);
+      Serial.print("-");
+      Serial.println(day);
+      Serial.print("GPS Time: ");
+      Serial.print(hour);
+      Serial.print(":");
+      Serial.print(minute);
+      Serial.print(":");
+      Serial.println(second);
+      Serial.print("Observer Latitude: ");
+      Serial.println(observerLatitude, 6);
+      Serial.print("Observer Longitude: ");
+      Serial.println(observerLongitude, 6);
+      Serial.print("Observer Altitude (km): ");
+      Serial.println(observerAltitude, 3);
+    }
     lcdClear();
-  } else {
+  }
+  if (!gps.location.isValid() || !gps.date.isValid()) {
+    Serial.print("Gps locaiton: ");
+    Serial.println(gps.location.isValid());
+    Serial.print("Gps date: ");
+    Serial.println(gps.date.isValid());
+    
     lcdSetSecondLine("DISABLED");
     delay(2000);
 
@@ -697,6 +734,15 @@ void setup() {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+      // Dummy HTTP request to wake up ESP32 
+      WiFiSSLClient client;
+      client.connect("google.com", 443);
+      client.println("GET / HTTP/1.1");
+      client.println("Host: google.com");
+      client.println("Connection: close");
+      client.println();
+      client.stop();
+
       lcdSetSecondLine("FETCH ISS TLE");
       while (!foundISSbyWifi && findISSbyWifiAttempts < 3) {
         findISSbyWifiAttempts++;
@@ -783,7 +829,7 @@ void loop() {
       snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
       lcdSetSecondLine(buffer);
     } else {
-      if (ISSIsVisible == true) {
+      if (ISSIsVisible == true || (currentTime - compassLastCalibrate < 10000)) {
         ISSIsVisible = false;
         lcdSetFirstLine("ISS");
         lcdSetSecondLine("BELOW HORIZON");
