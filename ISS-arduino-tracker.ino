@@ -1,10 +1,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
-// #include <AS5600.h>
 #include <LiquidCrystal_I2C.h>
 #include <QMC5883LCompass.h>
 #include <Servo.h>
-#include <TMCStepper.h>
 #include <TinyGPSPlus.h>
 #include <WiFiS3.h>
 
@@ -56,8 +54,13 @@ static bool ISSIsVisible = true;
 static int8_t direction = 1;
 // motor control
 static float currentAzimuth = 0.0;
-static float currentElevation = 90.0;                                  // Start at horizon
+static float currentElevation = 0.0; // Start at horizon
 static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0 * 61.0/15.0;  // 200 steps * 16 microsteps / 360 degrees * gear ratio (61/15)
+// compass monitoring
+static float previousCompassHeading = 0.0;
+static unsigned long lastCompassCheckTime = 0;
+static const float COMPASS_JUMP_THRESHOLD = 10.0;  // degrees
+static const unsigned long COMPASS_CHECK_INTERVAL = 3000;  // ms
 
 // -------- SERIALS --------
 #define AZIMUTH_SERIAL Serial1
@@ -66,8 +69,6 @@ static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0 * 61.0/15.0
 // -------- OBJECTS --------
 TinyGPSPlus gps;
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-TMC2209Stepper azimuthDriver(&AZIMUTH_SERIAL, TMC2209_RESISTANCE, 0);
-// AS5600 as5600;
 QMC5883LCompass compass;
 elsetrec satrec;
 Servo elevation;
@@ -439,6 +440,89 @@ void connectToWiFi() {
   }
 }
 
+float getCompassHeading() {
+  compass.read();
+  float magneticHeading = compass.getAzimuth();
+  float trueHeading = magneticHeading + magneticDeclination;
+  if (trueHeading < 0) trueHeading += 360;
+  if (trueHeading >= 360) trueHeading -= 360;
+  return trueHeading;
+}
+
+float calculateAngleDifference(float angle1, float angle2) {
+  float diff = angle2 - angle1;
+  // Handle wraparound cases
+  if (diff > 180) {
+    diff -= 360;
+  } else if (diff < -180) {
+    diff += 360;
+  }
+  return abs(diff);
+}
+
+void recalibrateCompass() {
+  Serial.println("Recalibrating...");
+  
+  lcdSetFirstLine("CALIBRATING");
+  lcdSetSecondLine("AZIMUTH");
+  
+  // Rotate until we're pointing north again
+  while (true) {
+    float currentHeading = getCompassHeading();
+    
+    Serial.print("Recalibrating - Current heading: ");
+    Serial.println(currentHeading);
+    
+    // Check if we're close to north (0 degrees)
+    if (abs(currentHeading) <= 0.5 || abs(currentHeading) >= 359.5) {
+      break;
+    }
+    
+    // Step the motor towards north
+    digitalWrite(AZIMUTH_STEP_PIN, HIGH);
+    delayMicroseconds(1000);
+    digitalWrite(AZIMUTH_STEP_PIN, LOW);
+    delayMicroseconds(1000);
+  }
+  
+  // Reset our azimuth position tracking
+  currentAzimuth = 0.0;
+  previousCompassHeading = getCompassHeading();
+  
+  lcdSetSecondLine("OK");
+  delay(2000);
+  
+  Serial.println("Compass recalibration complete");
+}
+
+bool checkForCompassJump() {
+  if (currentTime - lastCompassCheckTime >= COMPASS_CHECK_INTERVAL) {
+    float currentHeading = getCompassHeading();
+    
+    // Calculate the difference between current and previous heading
+    float headingDifference = calculateAngleDifference(previousCompassHeading, currentHeading);
+    
+    // Check if the difference exceeds our threshold
+    if (headingDifference > COMPASS_JUMP_THRESHOLD) {
+      Serial.print("Compass jump detected! Previous: ");
+      Serial.print(previousCompassHeading);
+      Serial.print("°, Current: ");
+      Serial.print(currentHeading);
+      Serial.print("°, Difference: ");
+      Serial.print(headingDifference);
+      Serial.println("°");
+      
+      return true;
+    }
+    
+    // Update previous heading and timestamp
+    previousCompassHeading = currentHeading;
+    lastCompassCheckTime = currentTime;
+  }
+  
+  return false;
+}
+
 void moveAzimuthTo(float targetAzimuth) {
   // Calculate the shortest path to target azimuth
   float angleDifference = targetAzimuth - currentAzimuth;
@@ -636,13 +720,13 @@ void setup() {
     strcpy(tle_line2, "2 25544  51.6325 262.1963 0004212 309.4705  50.5911 15.50156361527839");
   }
   parseISSTLE(tle_line1, tle_line2, satrec);
+  lcdSetSecondLine("TLE PARSED");
+  delay(2000);
   lcdClear();
   
-  // Ensure motor is disabled after configuration
   // Elevation Motor Initialization
   elevation.attach(ELEVATION_PIN);
-  elevation.write(0);
-  currentElevation = 0;
+  elevation.write(currentElevation);
 
   // Magnometer Initialization
   lcdSetFirstLine("QMC5883L INIT");
@@ -651,35 +735,21 @@ void setup() {
 
   lcdSetFirstLine("CALIBRATING");
   lcdSetSecondLine("AZIMUTH");
-
-  while (true) {
-    compass.read();
-    float magneticHeading = compass.getAzimuth();
-    float trueHeading = magneticHeading + magneticDeclination;
-    if (trueHeading < 0) trueHeading += 360;
-    if (trueHeading >= 360) trueHeading -= 360;
-    
-    Serial.print("True heading: ");
-    Serial.println(trueHeading);
-
-    digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-    delayMicroseconds(1000);
-    digitalWrite(AZIMUTH_STEP_PIN, LOW);
-    delayMicroseconds(1000);
-
-    if (abs(trueHeading) <= 0.5 || abs(trueHeading) >= 359.5) {
-      break;
-    }
-  }
-
-  lcdSetSecondLine("OK");
-  delay(2000);
+  recalibrateCompass();
+  previousCompassHeading = getCompassHeading();
+  lastCompassCheckTime = millis();
 
   lcdClear();
 }
 
 void loop() {
   currentTime = millis();
+
+  // Check for compass jumps indicating the tracker was moved
+  if (checkForCompassJump()) {
+    recalibrateCompass();
+    return;  // Skip this loop iteration to allow recalibration to complete
+  }
 
   double jdnow;
   jday(year, month, day, hour, minute, second, jdnow);
@@ -722,7 +792,16 @@ void loop() {
     lastLcdUpdateTime = currentTime;
   }
 
-  // moveAzimuthTo((float)azimuth_deg);
+  if (ENABLE_LOG) {
+    Serial.print("Azimuth: ");
+    Serial.print(azimuth_deg, 2);
+    Serial.print("°, Elevation: ");
+    Serial.print(elevation_deg, 2);
+    Serial.print("°, Range: ");
+    Serial.print(range_km, 2);
+    Serial.println(" km");
+  }
+
   moveElevationTo((float)elevation_deg);
   moveAzimuthTo((float)azimuth_deg);
 }
