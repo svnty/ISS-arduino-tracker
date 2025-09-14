@@ -1,6 +1,11 @@
-<div style="text-align: center;">
-![logo](https://raw.githubusercontent.com/svnty/ISS-arduino-tracker/refs/heads/main/images/logo.png "International Space Station Orbit Tracker")
-</div>
+<img 
+    style="display: block; 
+           margin-left: auto;
+           margin-right: auto;
+           width: 30%;"
+    src="https://raw.githubusercontent.com/svnty/ISS-arduino-tracker/refs/heads/main/images/logo.png" 
+    alt="Our logo">
+</img>
 
 # International Space Station Orbit Tracker
 
