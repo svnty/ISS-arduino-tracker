@@ -1,3 +1,7 @@
+<div style="text-align: center;">
+![logo](/images/logo.png "International Space Station Orbit Tracker")
+</div>
+
 # International Space Station Orbit Tracker
 
 Arduino implementation of an ISS tracker
