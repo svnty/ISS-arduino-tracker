@@ -1,5 +1,5 @@
 <div style="text-align: center;">
-![logo](/images/logo.png "International Space Station Orbit Tracker")
+![logo](https://raw.githubusercontent.com/svnty/ISS-arduino-tracker/refs/heads/main/images/logo.png "International Space Station Orbit Tracker")
 </div>
 
 # International Space Station Orbit Tracker
