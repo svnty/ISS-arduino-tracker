@@ -58,7 +58,6 @@ static char tle_line2[70];
 // gps data
 static double observerLatitude = 0.0, observerLongitude = 0.0, observerAltitude = 0.0;
 static int year, month, day, hour, minute, second;
-static bool ISSIsVisible = true;
 static int8_t direction = 1;
 // motor control
 static float currentAzimuth = 0.0;
@@ -111,11 +110,11 @@ void lcdSetSecondLine(String secondLineText) {
 }
 
 void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
+  lcdClear();
   // If ISS is overhead (elevation > 10°), always show ISS position
   bool issOverhead = elevation_deg > 10.0;
   
   if (issOverhead) {
-    ISSIsVisible = true;
     lcdSetFirstLine("ISS OVERHEAD!");
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
@@ -125,7 +124,6 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
   
   // If ISS is visible but not overhead, show ISS info
   if (elevation_deg > 0) {
-    ISSIsVisible = true;
     lcdSetFirstLine("ISS VISIBLE");
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
@@ -133,8 +131,6 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     return;
   }
   
-  // ISS is below horizon - rotate through different information displays
-  ISSIsVisible = false;
   
   unsigned long modeTime = (currentTime / LCD_MODE_INTERVAL) % 5;
   
