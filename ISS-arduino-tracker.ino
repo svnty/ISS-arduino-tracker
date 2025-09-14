@@ -5,6 +5,7 @@
 #include <Servo.h>
 #include <TinyGPSPlus.h>
 #include <WiFiS3.h>
+#include <Wire.h>
 
 #include "SGP4_vallado/sgp4coord.cpp"
 #include "SGP4_vallado/sgp4coord.h"
@@ -19,18 +20,25 @@ static const bool ENABLE_LOG = true;
 static const bool ENABLE_GPS = true;
 
 // -------- CONSTANTS --------
+// pins
 static const uint8_t ELEVATION_PIN = 9;
 static const uint8_t AZIMUTH_DIR_PIN = 10;
 static const uint8_t AZIMUTH_STEP_PIN = 11;
 static const uint8_t GPS_RX_PIN = 12;
-static const float TMC2209_RESISTANCE = 0.11; //ohms
+// stepper motor
+static const float TMC2209_RESISTANCE = 0.11;  // ohms
+// wifi
 static const char *WIFI_SSID = "Jakes iPhone", *WIFI_PASSWORD = "izeh5zemxa05r";
+// calculations
 static const double DEG_2_RAD = pi / 180.0;
 static const double RAD_2_DEG = 180.0 / pi;
+// http
 static const char *DECLINATION_HOST = "www.ngdc.noaa.gov";
 static const char *DECLINATION_API_KEY = "zNEw7";
 static const char *TLE_API_HOST = "celestrak.org";
-static const int PORT = 443;
+static const uint8_t PORT = 443;
+// i2c
+static const uint8_t MAX_i2c_DEVICES = 16;
 
 // -------- VARIABLES --------
 // timers
@@ -54,14 +62,20 @@ static bool ISSIsVisible = true;
 static int8_t direction = 1;
 // motor control
 static float currentAzimuth = 0.0;
-static float currentElevation = 0.0; // Start at horizon
-static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0 * 61.0/15.0;  // 200 steps * 16 microsteps / 360 degrees * gear ratio (61/15)
+static float currentElevation = 0.0;                                                 // Start at horizon
+static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0 * 61.0 / 15.0;  // 200 steps * 16 microsteps / 360 degrees * gear ratio (61/15)
 // compass monitoring
 static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
 static unsigned long compassLastCalibrate = 0;
-static const float COMPASS_JUMP_THRESHOLD = 5.0;  // degrees - balanced threshold
+static const float COMPASS_JUMP_THRESHOLD = 5.0;           // degrees - balanced threshold
 static const unsigned long COMPASS_CHECK_INTERVAL = 5000;  // ms - increased interval
+// i2c
+uint8_t i2cDeviceAddresses[MAX_i2c_DEVICES];
+uint8_t i2cDeviceCount = 0;
+// lcd
+static unsigned long lcdDisplayMode = 0;  // 0=ISS tracking, 1=location, 2=time, 3=compass
+static const unsigned long LCD_MODE_INTERVAL = 5000;  // 4 seconds per mode
 
 // -------- SERIALS --------
 HardwareSerial &GPS_SERIAL = Serial1;
@@ -94,6 +108,83 @@ void lcdSetSecondLine(String secondLineText) {
   lcd.print("                ");
   lcd.setCursor(0, 1);
   lcd.print(secondLineText);
+}
+
+void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
+  // If ISS is overhead (elevation > 10°), always show ISS position
+  bool issOverhead = elevation_deg > 10.0;
+  
+  if (issOverhead) {
+    ISSIsVisible = true;
+    lcdSetFirstLine("ISS OVERHEAD!");
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
+    lcdSetSecondLine(buffer);
+    return;
+  }
+  
+  // If ISS is visible but not overhead, show ISS info
+  if (elevation_deg > 0) {
+    ISSIsVisible = true;
+    lcdSetFirstLine("ISS VISIBLE");
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
+    lcdSetSecondLine(buffer);
+    return;
+  }
+  
+  // ISS is below horizon - rotate through different information displays
+  ISSIsVisible = false;
+  
+  unsigned long modeTime = (currentTime / LCD_MODE_INTERVAL) % 5;
+  
+  switch(modeTime) {
+    case 0: // ISS status and range
+      if (range_km < 1000) {
+        lcdSetFirstLine("ISS DISTANCE");
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "Range: %03.0fkm", range_km);
+        lcdSetSecondLine(buffer);
+      } else {
+        lcdSetFirstLine("ISS");
+        lcdSetSecondLine("BELOW HORIZON");
+      }
+      break;
+    case 1: // Observer location
+      lcdSetFirstLine("OBSERVER LOCATION");
+      {
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "%.2f,%.2f", observerLatitude, observerLongitude);
+        lcdSetSecondLine(buffer);
+      }
+      break;
+    case 2: // Current time
+      lcdSetFirstLine("TIME (UTC)");
+      {
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "%02d:%02d %d/%d/%02d", hour, minute, day, month, (year % 100));
+        lcdSetSecondLine(buffer);
+      }
+      break;
+      
+    case 3: // Compass heading and motor position
+      lcdSetFirstLine("COMPASS/MOTOR");
+      {
+        char buffer[16];
+        float compassHeading = getCompassHeading();
+        snprintf(buffer, sizeof(buffer), "C:%03.0f M:%03.0f", compassHeading, currentAzimuth);
+        lcdSetSecondLine(buffer);
+      }
+      break;
+    case 4: // ISS current azimuth (even when below horizon)
+      lcdSetFirstLine("ISS DIRECTION");
+      {
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "Az:%03.0f E:%0.0fkm", azimuth_deg, elevation_deg);
+        lcdSetSecondLine(buffer);
+      }
+      break;
+  }
 }
 
 void makeTleApiRequest() {
@@ -442,8 +533,8 @@ void connectToWiFi() {
 
 float getCompassHeading() {
   compass.read();
-  float reading =  compass.getAzimuth();
-  
+  float reading = compass.getAzimuth();
+
   float trueHeading = reading + magneticDeclination;
 
   if (trueHeading < 0) trueHeading += 360;
@@ -466,18 +557,27 @@ float calculateAngleDifference(float angle1, float angle2) {
 void recalibrateCompass() {
   lcdSetFirstLine("CALIBRATING");
   lcdSetSecondLine("AZIMUTH");
-  
+  float currentHeading = 0.0;
+
   // Rotate until we're pointing north again
   while (true) {
-    float currentHeading = getCompassHeading();
+    currentHeading = getCompassHeading();
     previousCompassHeading = currentHeading;
-    
+    i2cBusCheck();
+
     Serial.print("Calibrating - Current heading: ");
     Serial.println(currentHeading);
-    
+
     // Check if we're close to north (0 degrees)
     if (abs(currentHeading) <= 0.5 || abs(currentHeading) >= 359.5) {
       break;
+    }
+
+    // Determine direction to turn
+    if (currentHeading > 180) {
+      digitalWrite(AZIMUTH_DIR_PIN, HIGH);
+    } else {
+      digitalWrite(AZIMUTH_DIR_PIN, LOW);
     }
 
     // Step the motor towards north
@@ -486,14 +586,14 @@ void recalibrateCompass() {
     digitalWrite(AZIMUTH_STEP_PIN, LOW);
     delayMicroseconds(1000);
   }
-  
+
   // Reset our azimuth position tracking
-  currentAzimuth = 0.0;
+  currentAzimuth = currentHeading;
   compassLastCalibrate = currentTime;
 
   lcdSetSecondLine("OK");
   delay(2000);
-  
+
   Serial.println("Compass recalibration complete");
 }
 
@@ -522,8 +622,8 @@ bool checkForCompassJump() {
 }
 
 void moveAzimuthTo(float targetAzimuth) {
-  // Calculate the shortest path to target azimuth
   float angleDifference = targetAzimuth - currentAzimuth;
+  float currentHeading = 0.0;
 
   // Handle wraparound (e.g., from 350° to 10°)
   if (angleDifference > 180) {
@@ -532,35 +632,60 @@ void moveAzimuthTo(float targetAzimuth) {
     angleDifference += 360;
   }
 
-  // Only move if the difference is significant (>= 0.1 degrees)
-  if (abs(angleDifference) >= 0.1) {
-    long stepsToMove = (long)(angleDifference * AZIMUTH_STEPS_PER_DEGREE);
+  if (abs(angleDifference) >= 1) {
+    while (true) {
+      currentHeading = getCompassHeading();
+      previousCompassHeading = currentHeading;
+      i2cBusCheck();
 
-    // Set direction
-    digitalWrite(AZIMUTH_DIR_PIN, stepsToMove > 0 ? HIGH : LOW);
+      Serial.print("moveAzimuthTo - Current heading:");
+      Serial.println(currentHeading);
+      Serial.print("moveAzimuthTo - Target azimuth: ");
+      Serial.println(targetAzimuth);
 
-    // Move the motor
-    for (long i = 0; i < abs(stepsToMove); i++) {
+      // Calculate the shortest path to target
+      float headingDifference = targetAzimuth - currentHeading;
+      
+      // Handle wraparound for heading difference
+      if (headingDifference > 180) {
+        headingDifference -= 360;
+      } else if (headingDifference < -180) {
+        headingDifference += 360;
+      }
+      
+      Serial.println("moveAzimuthTo - Heading difference: " + String(headingDifference));
+      
+      // Check if close enough to target
+      if (abs(headingDifference) <= 0.5) {
+        break;
+      }
+
+      // Set direction based on shortest path
+      // Positive difference = turn clockwise (HIGH), negative = turn counter-clockwise (LOW)
+      if (headingDifference > 0) {
+        digitalWrite(AZIMUTH_DIR_PIN, HIGH);
+      } else {
+        digitalWrite(AZIMUTH_DIR_PIN, LOW);
+      }
+
       digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-      delayMicroseconds(500);  // Adjust speed as needed
+      delayMicroseconds(1000);
       digitalWrite(AZIMUTH_STEP_PIN, LOW);
-      delayMicroseconds(500);
+      delayMicroseconds(1000);
     }
 
-    // Update current position
-    float currentHeading = getCompassHeading();
-    currentAzimuth = currentHeading;
+    float finalHeading = getCompassHeading();
+    currentAzimuth = finalHeading;
     compassLastCalibrate = currentTime;
-    
+
     Serial.println("Finish moveAzimuthTo");
-    Serial.print("Target azimuth: ");
-    Serial.println(targetAzimuth);
     Serial.print("Previous compass heading: ");
     Serial.println(previousCompassHeading);
-    Serial.print("Current heading: ");
-    Serial.println(currentHeading);
-    
+    Serial.print("Current azimuth: ");
+    Serial.println(currentAzimuth);
+
     previousCompassHeading = currentHeading;
+
     // Normalize to 0-360 range
     if (currentAzimuth < 0) currentAzimuth += 360;
     if (currentAzimuth >= 360) currentAzimuth -= 360;
@@ -598,9 +723,71 @@ void moveElevationTo(float targetElevation) {
   }
 }
 
+void i2cBusCheck() {
+  bool busOk = true;
+  for (uint8_t i = 0; i < i2cDeviceCount; i++) {
+    Wire.beginTransmission(i2cDeviceAddresses[i]);
+    byte err = Wire.endTransmission();
+    if (err != 0) {
+      busOk = false;
+      break;
+    }
+  }
+
+  if (!busOk) {
+    Serial.println("Bus frozen! Recovering...");
+    i2cBusRecover();
+    return;
+  }
+}
+
+void i2cBusRecover() {
+  const uint8_t SDA_PIN = SDA;
+  const uint8_t SCL_PIN = SCL;
+
+  // Clock out 9 pulses to release any stuck slave
+  pinMode(SCL_PIN, OUTPUT);
+  pinMode(SDA_PIN, INPUT_PULLUP);
+
+  for (int i = 0; i < 9; i++) {
+    digitalWrite(SCL_PIN, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(SCL_PIN, LOW);
+    delayMicroseconds(5);
+  }
+
+  // Send STOP condition
+  pinMode(SDA_PIN, OUTPUT);
+  digitalWrite(SDA_PIN, LOW);
+  digitalWrite(SCL_PIN, HIGH);
+  digitalWrite(SDA_PIN, HIGH);
+
+  // Restore pins for Wire
+  pinMode(SDA_PIN, INPUT_PULLUP);
+  pinMode(SCL_PIN, INPUT_PULLUP);
+
+  // Reinitialize I2C master
+  Wire.begin();
+  Serial.println("I2C bus recovered!");
+}
+
 // -------- ARDUINO --------
 void setup() {
   Serial.begin(115200);
+  Wire.begin();
+  i2cBusRecover();
+
+  for (uint8_t address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    byte error = Wire.endTransmission();
+    if (error == 0) {
+      if (i2cDeviceCount < MAX_i2c_DEVICES) {
+        i2cDeviceAddresses[i2cDeviceCount++] = address;
+        Serial.print("Found device at 0x");
+        Serial.println(address, HEX);
+      }
+    }
+  }
 
   pinMode(AZIMUTH_STEP_PIN, OUTPUT);
   pinMode(AZIMUTH_DIR_PIN, OUTPUT);
@@ -738,7 +925,7 @@ void setup() {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-      // Dummy HTTP request to wake up ESP32 
+      // Dummy HTTP request to wake up ESP32
       WiFiSSLClient client;
       client.connect("google.com", 443);
       client.println("GET / HTTP/1.1");
@@ -773,7 +960,7 @@ void setup() {
   lcdSetSecondLine("TLE PARSED");
   delay(2000);
   lcdClear();
-  
+
   // Elevation Motor Initialization
   elevation.attach(ELEVATION_PIN);
   elevation.write(currentElevation);
@@ -808,6 +995,8 @@ void loop() {
   sgp4(wgs72, satrec, tsince, ro, vo);
 
   if (satrec.error != 0) {
+    lcdSetFirstLine("SGP4 ERROR");
+    lcdSetSecondLine(String(satrec.error));
     Serial.print("SGP4 Error: ");
     Serial.println(satrec.error);
     delay(1000);
@@ -825,20 +1014,8 @@ void loop() {
   }
 
   // Update LCD less frequently to reduce I2C interference
-  if (currentTime - lastLcdUpdateTime >= 2000) {
-    if (elevation_deg > 0) {
-      ISSIsVisible = true;
-      lcdSetFirstLine("ISS:");
-      char buffer[16];
-      snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
-      lcdSetSecondLine(buffer);
-    } else {
-      if (ISSIsVisible == true || (currentTime - compassLastCalibrate < 10000)) {
-        ISSIsVisible = false;
-        lcdSetFirstLine("ISS");
-        lcdSetSecondLine("BELOW HORIZON");
-      }
-    }
+  if (currentTime - lastLcdUpdateTime >= LCD_MODE_INTERVAL) {
+    updateLCD(azimuth_deg, elevation_deg, range_km);
     lastLcdUpdateTime = currentTime;
   }
 
