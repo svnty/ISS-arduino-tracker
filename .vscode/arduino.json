@@ -4,5 +4,9 @@
     "output": "build",
     "intelliSenseGen": "global",
     "programmer": "cmsis-dap",
-    "port": "/dev/tty.usbmodemB43A45B4DCB42"
+    "port": "/dev/tty.usbmodemB43A45B4DCB42",
+    "compilerArgs": [
+        "-Wall",
+        "-Wextra"
+    ]
 }

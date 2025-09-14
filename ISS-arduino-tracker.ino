@@ -63,9 +63,8 @@ static unsigned long compassLastCalibrate = 0;
 static const float COMPASS_JUMP_THRESHOLD = 5.0;  // degrees - balanced threshold
 static const unsigned long COMPASS_CHECK_INTERVAL = 5000;  // ms - increased interval
 
-
 // -------- SERIALS --------
-#define GPS_SERIAL Serial1
+HardwareSerial &GPS_SERIAL = Serial1;
 
 // -------- OBJECTS --------
 TinyGPSPlus gps;
@@ -549,11 +548,19 @@ void moveAzimuthTo(float targetAzimuth) {
     }
 
     // Update current position
-    currentAzimuth = targetAzimuth;
     float currentHeading = getCompassHeading();
-    previousCompassHeading = currentHeading;
+    currentAzimuth = currentHeading;
     compassLastCalibrate = currentTime;
-
+    
+    Serial.println("Finish moveAzimuthTo");
+    Serial.print("Target azimuth: ");
+    Serial.println(targetAzimuth);
+    Serial.print("Previous compass heading: ");
+    Serial.println(previousCompassHeading);
+    Serial.print("Current heading: ");
+    Serial.println(currentHeading);
+    
+    previousCompassHeading = currentHeading;
     // Normalize to 0-360 range
     if (currentAzimuth < 0) currentAzimuth += 360;
     if (currentAzimuth >= 360) currentAzimuth -= 360;
@@ -606,14 +613,14 @@ void setup() {
   delay(1000);
 
   // GPS Initialization
-  lcdSetFirstLine("GPS INIT");
   if (ENABLE_GPS) {
+    lcdSetFirstLine("GPS INIT");
     Serial.println("Initializing GPS...");
     GPS_SERIAL.begin(9600);
     unsigned long gpsTimeoutTimer = millis();
 
     while (!gps.location.isValid()) {
-      if (millis() - gpsTimeoutTimer > 30000) {
+      if (millis() - gpsTimeoutTimer > 60 * 1000) {
         lcdSetSecondLine("TIMEOUT");
         delay(2000);
         break;
@@ -627,12 +634,15 @@ void setup() {
       }
     }
     if (gps.location.isValid()) {
+      observerLatitude = gps.location.lat();
+      observerLongitude = gps.location.lng();
+      observerAltitude = gps.altitude.kilometers();
       lcdSetSecondLine("LOCATION OK");
       delay(2000);
     }
 
     while (!gps.date.isValid()) {
-      if (millis() - gpsTimeoutTimer > 30000) {
+      if (millis() - gpsTimeoutTimer > 60 * 1000) {
         lcdSetSecondLine("TIMEOUT");
         delay(2000);
         break;
@@ -646,19 +656,15 @@ void setup() {
       }
     }
     if (gps.date.isValid()) {
+      year = gps.date.year();
+      month = gps.date.month();
+      day = gps.date.day();
+      hour = gps.time.hour();
+      minute = gps.time.minute();
+      second = gps.time.second();
       lcdSetSecondLine("DATE OK");
       delay(2000);
     }
-
-    year = gps.date.year();
-    month = gps.date.month();
-    day = gps.date.day();
-    hour = gps.time.hour();
-    minute = gps.time.minute();
-    second = gps.time.second();
-    observerLatitude = gps.location.lat();
-    observerLongitude = gps.location.lng();
-    observerAltitude = gps.altitude.kilometers();
 
     if (ENABLE_LOG) {
       Serial.print("GPS Date: ");
@@ -667,7 +673,7 @@ void setup() {
       Serial.print(month);
       Serial.print("-");
       Serial.println(day);
-      Serial.print("GPS Time: ");
+      Serial.print("GPS Time (UTC): ");
       Serial.print(hour);
       Serial.print(":");
       Serial.print(minute);
@@ -682,25 +688,23 @@ void setup() {
     }
     lcdClear();
   }
-  if (!gps.location.isValid() || !gps.date.isValid()) {
-    Serial.print("Gps locaiton: ");
-    Serial.println(gps.location.isValid());
-    Serial.print("Gps date: ");
-    Serial.println(gps.date.isValid());
-    
-    lcdSetSecondLine("DISABLED");
-    delay(2000);
+  if (!gps.location.isValid()) {
+    Serial.print("Gps location: ");
+    Serial.println(gps.location.isValid() ? "Valid" : "Invalid");
 
-    year = 2025;
-    month = 9;
-    day = 13;
-    hour = 12;
-    minute = 0;
-    second = 0;
     observerLatitude = -33.88336;
     observerLongitude = 152.20148;
     observerAltitude = 0.035;
-    lcdClear();
+  }
+  if (!gps.date.isValid()) {
+    Serial.print("Gps date: ");
+    Serial.println(gps.date.isValid() ? "Valid" : "Invalid");
+    year = 2025;
+    month = 9;
+    day = 15;
+    hour = 12;
+    minute = 0;
+    second = 0;
   }
 
   // WiFi Initialization
@@ -714,7 +718,7 @@ void setup() {
         break;
       }
     }
-    int wifiReconnectAttempts = 0;
+    int wifiReconnectAttempts = 1;
 
     while (WiFi.status() != WL_CONNECTED) {
       wifiReconnectAttempts++;
