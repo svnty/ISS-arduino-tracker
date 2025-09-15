@@ -26,21 +26,28 @@ Prices in Australian dollars
 6. 12V DC -> 9V DC voltage regulator ($10)
 7. QMC5883 magnometer ($5)
 8. 12 wire 5A slip ring 22mm ($30)
-9. 20 AWG wire ($15)
-10. Jumper wires ($20)
-11. 16x2 LCD + I2C Backpack ($10)
-12. 1kg Nylon filament ($60)
-13. 1kg PLA filament ($20)
-14. ATGM336H GPS ($20)
-15. Solder breadboard ($15)
-16. 3 pin rocker power switch ($10)
-17. M3 nuts + screws ($10)
-18. PTFE grease ($10)
+9. 15 AWG wire ($5)
+10. 20 AWG wire ($15)
+11. Dupont jumper wires ($20)
+12. 16x2 LCD + I2C Backpack ($10)
+13. 1kg Nylon filament ($60)
+14. 1kg PLA filament ($20)
+15. ATGM336H GPS ($20)
+16. Solder breadboard ($15)
+17. 3 pin rocker power switch ($10)
+18. M3 nuts + screws ($10)
+19. PTFE grease ($10)
+20. Solder ($5)
+21. Heat shrink ($5)
+22. GT2 Pulley belt ($10)
+23. Superglue ($1)
+24. 2.1mm DC barrel jack ($2)
 
-Total cost: ≈ $370
+Total cost: ≈ $400
 
 ## Tools used
 
-Anycubic Kobra S1 
-TS80 soldering iron
-
+1. Anycubic Kobra S1 3D printer
+2. TS80 soldering iron
+3. Phillips head screwdriver
+4. Precision knife
