@@ -15,9 +15,9 @@
 #include "SGP4_vallado/sgp4unit.h"
 
 // -------- SYSTEM TOGGLES --------
-static const bool ENABLE_WIFI = true;
+static const bool ENABLE_WIFI = false;
 static const bool ENABLE_LOG = true;
-static const bool ENABLE_GPS = true;
+static const bool ENABLE_GPS = false;
 
 // -------- CONSTANTS --------
 // pins
@@ -131,7 +131,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
   }
   
   
-  unsigned long modeTime = (currentTime / LCD_MODE_INTERVAL) % 5;
+  unsigned long modeTime = ( currentTime / LCD_MODE_INTERVAL) % 5;
   
   switch(modeTime) {
     case 0: // ISS status and range
@@ -161,7 +161,6 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
         lcdSetSecondLine(buffer);
       }
       break;
-      
     case 3: // Compass heading and motor position
       lcdSetFirstLine("COMPASS/MOTOR");
       {
