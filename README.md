@@ -7,3 +7,9 @@
 Arduino implementation of an ISS tracker
 
 Print all files in stl_files folder, use Nylon for the bearing (Race Inner Bottom, Race Inner Top, Race Outer, Rolls) at a high infill, and PLA for everything else at 15% infill.
+
+## Model
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/svnty/ISS-arduino-tracker/refs/heads/main/images/ISS-arduino-tracker.png?raw=true" alt="International Space Station Orbit Tracker"/>
+</p>
