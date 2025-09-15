@@ -52,3 +52,13 @@ Total cost: ≈ $400
 2. TS80 soldering iron
 3. Phillips head screwdriver
 4. Precision knife
+
+# Build Example
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/svnty/ISS-arduino-tracker/refs/heads/main/images/img1.png?raw=true" alt="International Space Station Orbit Tracker"/>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/svnty/ISS-arduino-tracker/refs/heads/main/images/img2.png?raw=true" alt="International Space Station Orbit Tracker"/>
+</p>
