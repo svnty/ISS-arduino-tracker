@@ -62,7 +62,6 @@ static int8_t direction = 1;
 // motor control
 static float currentAzimuth = 0.0;
 static float currentElevation = 0.0;                                                 // Start at horizon
-static const float AZIMUTH_STEPS_PER_DEGREE = (200.0 * 16.0) / 360.0 * 61.0 / 15.0;  // 200 steps * 16 microsteps / 360 degrees * gear ratio (61/15)
 // compass monitoring
 static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
