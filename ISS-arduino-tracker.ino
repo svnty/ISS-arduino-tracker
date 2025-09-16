@@ -40,7 +40,7 @@ static const uint8_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
-static const float COMPASS_AZIMUTH_OFFSET = 60.0;
+static const float COMPASS_AZIMUTH_OFFSET = 180 + 17;
 // lcd
 static const unsigned long LCD_MODE_INTERVAL = 5000;
 
@@ -56,7 +56,7 @@ static bool foundISSbyWifi = false;
 static uint8_t findISSbyWifiAttempts = 0;
 static bool foundDeclinationByWifi = false;
 static uint8_t findDeclinationByWifiAttempts = 0;
-static float magneticDeclination = 0.0;
+static float magneticDeclination = 12.7;
 static char tle_line1[70];
 static char tle_line2[70];
 // gps data
@@ -549,7 +549,7 @@ float calculateAngleDifference(float angle1, float angle2) {
   return abs(diff);
 }
 
-void recalibrateCompass() {
+void recalibrateAzimuth() {
   lcdSetFirstLine("CALIBRATING");
   lcdSetSecondLine("AZIMUTH");
   float currentHeading = 0.0;
@@ -618,11 +618,7 @@ bool checkForCompassJump() {
 
 void moveAzimuthTo(float targetAzimuth) {
   // Apply offset to target azimuth so movement is corrected
-  float correctedTargetAzimuth = targetAzimuth + COMPASS_AZIMUTH_OFFSET;
-  if (correctedTargetAzimuth >= 360) correctedTargetAzimuth -= 360;
-  if (correctedTargetAzimuth < 0) correctedTargetAzimuth += 360;
-
-  float angleDifference = correctedTargetAzimuth - currentAzimuth;
+  float angleDifference = targetAzimuth - currentAzimuth;
   float currentHeading = 0.0;
 
   // Handle wraparound (e.g., from 350° to 10°)
@@ -633,18 +629,41 @@ void moveAzimuthTo(float targetAzimuth) {
   }
 
   if (abs(angleDifference) >= 1) {
+    // Calculate direction ONCE at the beginning based on initial heading
+    float initialHeading = getCompassHeading();
+    float initialDifference = targetAzimuth - initialHeading;
+    
+    // Handle wraparound for initial heading difference
+    if (initialDifference > 180) {
+      initialDifference -= 360;
+    } else if (initialDifference < -180) {
+      initialDifference += 360;
+    }
+    
+    // Determine direction and stick with it
+    bool moveClockwise = (initialDifference > 0);
+    
+    Serial.print("moveAzimuthTo - Initial heading: ");
+    Serial.println(initialHeading);
+    Serial.print("moveAzimuthTo - Target azimuth: ");
+    Serial.println(targetAzimuth);
+    Serial.print("moveAzimuthTo - Initial difference: ");
+    Serial.println(initialDifference);
+    Serial.print("moveAzimuthTo - Direction chosen: ");
+    Serial.println(moveClockwise ? "CLOCKWISE" : "COUNTER-CLOCKWISE");
+    
+    // Set direction pin once
+    digitalWrite(AZIMUTH_DIR_PIN, moveClockwise ? HIGH : LOW);
+    
     while (true) {
       currentHeading = getCompassHeading();
-      previousCompassHeading = currentHeading;
       i2cBusCheck();
 
       Serial.print("moveAzimuthTo - Current heading:");
       Serial.println(currentHeading);
-      Serial.print("moveAzimuthTo - Target azimuth (corrected): ");
-      Serial.println(correctedTargetAzimuth);
 
-      // Calculate the shortest path to target
-      float headingDifference = correctedTargetAzimuth - currentHeading;
+      // Calculate current difference to target
+      float headingDifference = targetAzimuth - currentHeading;
       // Handle wraparound for heading difference
       if (headingDifference > 180) {
         headingDifference -= 360;
@@ -659,14 +678,7 @@ void moveAzimuthTo(float targetAzimuth) {
         break;
       }
 
-      // Set direction based on shortest path
-      // Positive difference = turn clockwise (HIGH), negative = turn counter-clockwise (LOW)
-      if (headingDifference > 0) {
-        digitalWrite(AZIMUTH_DIR_PIN, HIGH);
-      } else {
-        digitalWrite(AZIMUTH_DIR_PIN, LOW);
-      }
-
+      // Take step in the predetermined direction (NO direction recalculation)
       digitalWrite(AZIMUTH_STEP_PIN, HIGH);
       delayMicroseconds(1000);
       digitalWrite(AZIMUTH_STEP_PIN, LOW);
@@ -968,9 +980,7 @@ void setup() {
   compass.init();
   delay(2000);
 
-  lcdSetFirstLine("CALIBRATING");
-  lcdSetSecondLine("AZIMUTH");
-  recalibrateCompass();
+  recalibrateAzimuth();
   previousCompassHeading = getCompassHeading();
   lastCompassCheckTime = millis();
 
@@ -982,7 +992,7 @@ void loop() {
 
   // Check for compass jumps indicating the tracker was moved
   if (checkForCompassJump()) {
-    recalibrateCompass();
+    recalibrateAzimuth();
     return;  // Skip this loop iteration to allow recalibration to complete
   }
 

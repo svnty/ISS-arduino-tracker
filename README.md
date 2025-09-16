@@ -43,6 +43,7 @@ Print all files in stl_files folder, use Nylon for the bearing (Race Inner Botto
 | 1m GT2 pulley belt | $10 |
 | Superglue | $1 |
 | 2.1mm DC barrel jack | $2 |
+| Contact Cement | $10 |
 
 Total cost: ≈ $400
 
