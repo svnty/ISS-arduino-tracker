@@ -15,9 +15,9 @@
 #include "SGP4_vallado/sgp4unit.h"
 
 // -------- SYSTEM TOGGLES --------
-static const bool ENABLE_WIFI = false;
+static const bool ENABLE_WIFI = true;
 static const bool ENABLE_LOG = true;
-static const bool ENABLE_GPS = false;
+static const bool ENABLE_GPS = true;
 
 // -------- CONSTANTS --------
 // pins
@@ -36,7 +36,7 @@ static const double RAD_2_DEG = 180.0 / pi;
 static const char *DECLINATION_HOST = "www.ngdc.noaa.gov";
 static const char *DECLINATION_API_KEY = "zNEw7";
 static const char *TLE_API_HOST = "celestrak.org";
-static const uint8_t PORT = 443;
+static const uint16_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
@@ -132,7 +132,6 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     return;
   }
   
-  
   unsigned long modeTime = ( currentTime / LCD_MODE_INTERVAL) % 5;
   
   switch(modeTime) {
@@ -204,7 +203,7 @@ void makeTleApiRequest() {
 
   String request = "GET " + String("/NORAD/elements/gp.php?GROUP=stations") + " HTTP/1.1\r\n";
   request += "Host: " + String(TLE_API_HOST) + "\r\n";
-  request += "User-Agent: Arduino/1.0\r\n";
+  request += "User-Agent: ArduinoUnoR4Wifi/1.0\r\n";
   request += "Cache-Control: no-cache\r\n";
   request += "Connection: close\r\n";
   request += "\r\n";
@@ -321,7 +320,7 @@ void makeDeclinationApiRequest() {
 
   String request = "GET " + String(apiPath) + " HTTP/1.1\r\n";
   request += "Host: " + String(DECLINATION_HOST) + "\r\n";
-  request += "User-Agent: Arduino/1.0\r\n";
+  request += "User-Agent: ArduinoUnoR4Wifi/1.0\r\n";
   request += "Accept: application/json\r\n";
   request += "Cache-Control: no-cache\r\n";
   request += "Connection: close\r\n";
@@ -628,7 +627,7 @@ void moveAzimuthTo(float targetAzimuth) {
     angleDifference += 360;
   }
 
-  if (abs(angleDifference) >= 1) {
+  if (abs(angleDifference) >= 0.5) {
     // Calculate direction ONCE at the beginning based on initial heading
     float initialHeading = getCompassHeading();
     float initialDifference = targetAzimuth - initialHeading;
@@ -652,7 +651,6 @@ void moveAzimuthTo(float targetAzimuth) {
     Serial.print("moveAzimuthTo - Direction chosen: ");
     Serial.println(moveClockwise ? "CLOCKWISE" : "COUNTER-CLOCKWISE");
     
-    // Set direction pin once
     digitalWrite(AZIMUTH_DIR_PIN, moveClockwise ? HIGH : LOW);
     
     while (true) {
@@ -833,7 +831,12 @@ void setup() {
     if (gps.location.isValid()) {
       observerLatitude = gps.location.lat();
       observerLongitude = gps.location.lng();
-      observerAltitude = gps.altitude.kilometers();
+      // Use GPS altitude if available and reasonable, otherwise use default
+      if (gps.altitude.isValid() && gps.altitude.kilometers() > -0.5 && gps.altitude.kilometers() < 10.0) {
+        observerAltitude = gps.altitude.kilometers();
+      } else {
+        observerAltitude = 0.050; // Default altitude for Sydney area (50m above sea level)
+      }
       lcdSetSecondLine("LOCATION OK");
       delay(2000);
     }
@@ -864,6 +867,7 @@ void setup() {
     }
 
     if (ENABLE_LOG) {
+      Serial.println();
       Serial.print("GPS Date: ");
       Serial.print(year);
       Serial.print("-");
@@ -898,7 +902,7 @@ void setup() {
     Serial.println(gps.date.isValid() ? "Valid" : "Invalid");
     year = 2025;
     month = 9;
-    day = 15;
+    day = 17;  // Updated to current date
     hour = 12;
     minute = 0;
     second = 0;
@@ -935,6 +939,7 @@ void setup() {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("Sending dummy data to wake up ESP32");
       // Dummy HTTP request to wake up ESP32
       WiFiSSLClient client;
       client.connect("google.com", 443);
@@ -963,11 +968,12 @@ void setup() {
     WiFi.disconnect();
   }
   if (!foundISSbyWifi) {
-    strcpy(tle_line1, "1 25544U 98067A   25249.87397102  .00012937  00000+0  23296-3 0  9995");
-    strcpy(tle_line2, "2 25544  51.6325 262.1963 0004212 309.4705  50.5911 15.50156361527839");
+    strcpy(tle_line1, "1 25544U 98067A   25259.15672217  .00010925  00000+0  19686-3 0  9993");
+    strcpy(tle_line2, "2 25544  51.6329 216.1838 0004346 344.8645  15.2213 15.50326031529273");
   }
   parseISSTLE(tle_line1, tle_line2, satrec);
-  lcdSetSecondLine("TLE PARSED");
+  lcdClear();
+  lcdSetFirstLine("DATA PARSED");
   delay(2000);
   lcdClear();
 
@@ -996,9 +1002,41 @@ void loop() {
     return;  // Skip this loop iteration to allow recalibration to complete
   }
 
+  // DEBUG: Print current time being used
+  if (ENABLE_LOG) {
+    Serial.println("=== DEBUG INFO ===");
+    Serial.print("Current time: ");
+    Serial.print(year); Serial.print("-");
+    Serial.print(month); Serial.print("-");
+    Serial.print(day); Serial.print(" ");
+    Serial.print(hour); Serial.print(":");
+    Serial.print(minute); Serial.print(":");
+    Serial.println(second);
+    Serial.print("Observer: ");
+    Serial.print(observerLatitude, 6); Serial.print(", ");
+    Serial.print(observerLongitude, 6); Serial.print(", ");
+    Serial.print(observerAltitude, 3); Serial.println(" km");
+  }
+
   double jdnow;
   jday(year, month, day, hour, minute, second, jdnow);
+  
+  // DEBUG: Print Julian day calculations
+  if (ENABLE_LOG) {
+    Serial.print("Julian day now: ");
+    Serial.println(jdnow, 8);
+    Serial.print("Satellite epoch JD: ");
+    Serial.println(satrec.jdsatepoch, 8);
+  }
+  
   double tsince = (jdnow - satrec.jdsatepoch) * 24.0 * 60.0;
+  
+  // DEBUG: Print time since epoch
+  if (ENABLE_LOG) {
+    Serial.print("Time since epoch (minutes): ");
+    Serial.println(tsince, 2);
+  }
+  
   double ro[3], vo[3];
   sgp4(wgs72, satrec, tsince, ro, vo);
 
@@ -1011,8 +1049,24 @@ void loop() {
     return;
   }
 
+  // DEBUG: Print SGP4 position results
+  if (ENABLE_LOG) {
+    Serial.print("SGP4 position (km): ");
+    Serial.print(ro[0], 3); Serial.print(", ");
+    Serial.print(ro[1], 3); Serial.print(", ");
+    Serial.println(ro[2], 3);
+  }
+
   double razel[3], razelrates[3];
   rv2azel(ro, vo, observerLatitude * DEG_2_RAD, observerLongitude * DEG_2_RAD, observerAltitude, jdnow, razel, razelrates);
+
+  // DEBUG: Print raw razel results
+  if (ENABLE_LOG) {
+    Serial.print("Raw razel: ");
+    Serial.print(razel[0], 3); Serial.print(" km, ");
+    Serial.print(razel[1] * RAD_2_DEG, 3); Serial.print("° az, ");
+    Serial.print(razel[2] * RAD_2_DEG, 3); Serial.println("° el");
+  }
 
   double azimuth_deg = razel[1] * RAD_2_DEG;
   double elevation_deg = razel[2] * RAD_2_DEG;
@@ -1021,22 +1075,23 @@ void loop() {
     azimuth_deg += 360.0;
   }
 
-  // Update LCD less frequently to reduce I2C interference
-  if (currentTime - lastLcdUpdateTime >= LCD_MODE_INTERVAL) {
-    updateLCD(azimuth_deg, elevation_deg, range_km);
-    lastLcdUpdateTime = currentTime;
-  }
-
   if (ENABLE_LOG) {
-    Serial.print("Azimuth: ");
+    Serial.print("FINAL: Azimuth: ");
     Serial.print(azimuth_deg, 2);
     Serial.print("°, Elevation: ");
     Serial.print(elevation_deg, 2);
     Serial.print("°, Range: ");
     Serial.print(range_km, 2);
     Serial.println(" km");
+    Serial.println("==================");
   }
 
   moveElevationTo((float)elevation_deg);
   moveAzimuthTo((float)azimuth_deg);
+
+  // Update LCD less frequently to reduce I2C interference
+  if (currentTime - lastLcdUpdateTime >= LCD_MODE_INTERVAL) {
+    updateLCD(azimuth_deg, elevation_deg, range_km);
+    lastLcdUpdateTime = currentTime;
+  }
 }
