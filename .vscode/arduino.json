@@ -1,6 +1,6 @@
 {
     "board": "arduino:renesas_uno:unor4wifi",
-    "sketch": "src/src.ino",
+    "sketch": "ISS-arduino-tracker.ino",
     "output": "build",
     "intelliSenseGen": "global",
     "programmer": "cmsis-dap",

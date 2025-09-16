@@ -39,6 +39,10 @@ static const char *TLE_API_HOST = "celestrak.org";
 static const uint8_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
+// compass
+static const float COMPASS_AZIMUTH_OFFSET = 60.0;
+// lcd
+static const unsigned long LCD_MODE_INTERVAL = 5000;
 
 // -------- VARIABLES --------
 // timers
@@ -58,22 +62,20 @@ static char tle_line2[70];
 // gps data
 static double observerLatitude = 0.0, observerLongitude = 0.0, observerAltitude = 0.0;
 static int year, month, day, hour, minute, second;
-static int8_t direction = 1;
 // motor control
 static float currentAzimuth = 0.0;
-static float currentElevation = 0.0;                                                 // Start at horizon
-// compass monitoring
+static float currentElevation = 90.0;
+// compass
 static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
 static unsigned long compassLastCalibrate = 0;
-static const float COMPASS_JUMP_THRESHOLD = 5.0;           // degrees - balanced threshold
-static const unsigned long COMPASS_CHECK_INTERVAL = 5000;  // ms - increased interval
+static const float COMPASS_JUMP_THRESHOLD = 5.0; // degrees
+static const unsigned long COMPASS_CHECK_INTERVAL = 5000;
 // i2c
 uint8_t i2cDeviceAddresses[MAX_i2c_DEVICES];
 uint8_t i2cDeviceCount = 0;
 // lcd
-static unsigned long lcdDisplayMode = 0;  // 0=ISS tracking, 1=location, 2=time, 3=compass
-static const unsigned long LCD_MODE_INTERVAL = 5000;  // 4 seconds per mode
+static unsigned long lcdDisplayMode = 0;
 
 // -------- SERIALS --------
 HardwareSerial &GPS_SERIAL = Serial1;
@@ -529,11 +531,10 @@ float getCompassHeading() {
   compass.read();
   float reading = compass.getAzimuth();
 
-  float trueHeading = reading + magneticDeclination;
-
+  // Apply compass offset so azimuth is corrected
+  float trueHeading = reading + magneticDeclination + COMPASS_AZIMUTH_OFFSET;
   if (trueHeading < 0) trueHeading += 360;
   if (trueHeading >= 360) trueHeading -= 360;
-
   return trueHeading;
 }
 
@@ -616,7 +617,12 @@ bool checkForCompassJump() {
 }
 
 void moveAzimuthTo(float targetAzimuth) {
-  float angleDifference = targetAzimuth - currentAzimuth;
+  // Apply offset to target azimuth so movement is corrected
+  float correctedTargetAzimuth = targetAzimuth + COMPASS_AZIMUTH_OFFSET;
+  if (correctedTargetAzimuth >= 360) correctedTargetAzimuth -= 360;
+  if (correctedTargetAzimuth < 0) correctedTargetAzimuth += 360;
+
+  float angleDifference = correctedTargetAzimuth - currentAzimuth;
   float currentHeading = 0.0;
 
   // Handle wraparound (e.g., from 350° to 10°)
@@ -634,21 +640,20 @@ void moveAzimuthTo(float targetAzimuth) {
 
       Serial.print("moveAzimuthTo - Current heading:");
       Serial.println(currentHeading);
-      Serial.print("moveAzimuthTo - Target azimuth: ");
-      Serial.println(targetAzimuth);
+      Serial.print("moveAzimuthTo - Target azimuth (corrected): ");
+      Serial.println(correctedTargetAzimuth);
 
       // Calculate the shortest path to target
-      float headingDifference = targetAzimuth - currentHeading;
-      
+      float headingDifference = correctedTargetAzimuth - currentHeading;
       // Handle wraparound for heading difference
       if (headingDifference > 180) {
         headingDifference -= 360;
       } else if (headingDifference < -180) {
         headingDifference += 360;
       }
-      
+
       Serial.println("moveAzimuthTo - Heading difference: " + String(headingDifference));
-      
+
       // Check if close enough to target
       if (abs(headingDifference) <= 0.5) {
         break;
@@ -687,8 +692,7 @@ void moveAzimuthTo(float targetAzimuth) {
 }
 
 void moveElevationTo(float targetElevation) {
-  // Convert elevation angle to servo position
-  // Your system: horizon = 90°, up = 0°, down = 180°
+  // Convert elevation angle to servo position, Horizon = 90°, up = 0°, down = 180°
   // ISS elevation: 0° = horizon, 90° = directly up, negative = below horizon
 
   float servoPosition;
