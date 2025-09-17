@@ -41,12 +41,15 @@ static const uint16_t PORT = 443;
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
 static const float COMPASS_AZIMUTH_OFFSET = 180 + 17; // degrees
+static const float COMPASS_JUMP_THRESHOLD = 5.0; // degrees
+static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000; // 5 seconds
 // lcd
-static const unsigned long LCD_UPDATE_INTERVAL = 5000; // 5 seconds
+static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000; // 5 seconds
 // wifi 
 static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
 // gps
 static const unsigned long GPS_UPDATE_INTERVAL = 30 * 1000; // 30 seconds 
+static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000; // 1 minute
 
 // -------- VARIABLES --------
 // timers
@@ -55,12 +58,13 @@ static unsigned long lastLcdUpdateTime = 0;
 static unsigned long lastGpsUpdateTime = 0;
 static unsigned long lastWiFiUpdateTime = 0;
 static unsigned long lastWiFiReconnectAttemptTime = 0;
+static unsigned long gpsTimeoutTimer = 0;
 // http data
 static bool foundISSbyWifi = false;
 static uint8_t findISSbyWifiAttempts = 0;
 static bool foundDeclinationByWifi = false;
 static uint8_t findDeclinationByWifiAttempts = 0;
-static float magneticDeclination = 12.7;
+static float magneticDeclination = 12.7; // degrees
 static char tle_line1[70];
 static char tle_line2[70];
 // gps data
@@ -73,8 +77,6 @@ static float currentElevation = 90.0;
 static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
 static unsigned long compassLastCalibrate = 0;
-static const float COMPASS_JUMP_THRESHOLD = 5.0; // degrees
-static const unsigned long COMPASS_CHECK_INTERVAL = 5000;
 // i2c
 uint8_t i2cDeviceAddresses[MAX_i2c_DEVICES];
 uint8_t i2cDeviceCount = 0;
@@ -829,10 +831,10 @@ void setup() {
     lcdSetFirstLine("GPS INIT");
     Serial.println("Initializing GPS...");
     GPS_SERIAL.begin(9600);
-    unsigned long gpsTimeoutTimer = millis();
+    gpsTimeoutTimer = millis();
 
     while (!gps.location.isValid()) {
-      if (millis() - gpsTimeoutTimer > 60 * 1000) {
+      if (millis() - gpsTimeoutTimer > GPS_TIMEOUT_INTERVAL) {
         lcdSetSecondLine("TIMEOUT");
         delay(2000);
         break;
@@ -859,7 +861,7 @@ void setup() {
     }
 
     while (!gps.date.isValid()) {
-      if (millis() - gpsTimeoutTimer > 60 * 1000) {
+      if (millis() - gpsTimeoutTimer > GPS_TIMEOUT_INTERVAL) {
         lcdSetSecondLine("TIMEOUT");
         delay(2000);
         break;
@@ -1006,8 +1008,17 @@ void loop() {
 
   // update the time and location every 30 seconds
   if (ENABLE_GPS) {
-    if (currentTime - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) { 
+    // reset timeout and try again to fetch gps data every 10 minute
+    if (currentTime - gpsTimeoutTimer >= 10 * 60 * 1000) {
+      gpsTimeoutTimer = currentTime;
+    }
+    // Update GPS data every 30 seconds
+    if (currentTime - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) {
       while (GPS_SERIAL.available()) {
+        // if it takes more than 1 minute to get a fix, give up
+        if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
+          break;
+        }
         gps.encode(GPS_SERIAL.read());
       }
       lastGpsUpdateTime = currentTime;
