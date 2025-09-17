@@ -28,7 +28,7 @@ Print all files in stl_files folder, use Nylon for the bearing (Race Inner Botto
 | 12 wire 5A slip ring 22mm | $30 |
 | 15 AWG wire | $5 |
 | 20 AWG wire | $15 |
-| Dupont jumper wires | $ 20 |
+| Dupont jumper wires | $20 |
 | 16x2 LCD + I2C Backpack | $10 |
 | 1kg Nylon filament | $60 |
 | 1kg PLA filament | $20 |
@@ -44,6 +44,7 @@ Print all files in stl_files folder, use Nylon for the bearing (Race Inner Botto
 | Superglue | $1 |
 | 2.1mm DC barrel jack | $2 |
 | Contact Cement | $10 |
+| 100 uF capacitor | $2 |
 
 Total cost: ≈ $400
 
