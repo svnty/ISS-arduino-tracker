@@ -40,17 +40,21 @@ static const uint16_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
-static const float COMPASS_AZIMUTH_OFFSET = 180 + 17;
+static const float COMPASS_AZIMUTH_OFFSET = 180 + 17; // degrees
 // lcd
-static const unsigned long LCD_MODE_INTERVAL = 5000;
+static const unsigned long LCD_UPDATE_INTERVAL = 5000; // 5 seconds
+// wifi 
+static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
+// gps
+static const unsigned long GPS_UPDATE_INTERVAL = 30 * 1000; // 30 seconds 
 
 // -------- VARIABLES --------
 // timers
 static unsigned long currentTime = 0;
-static unsigned long lastLcdUpdateTime = 1000;
-static unsigned long lastDeclinationUpdateTime = 0;
-static unsigned long lastWiFiReconnectAttempt = 0;
-static unsigned long wifiReconnectInterval = 5000;
+static unsigned long lastLcdUpdateTime = 0;
+static unsigned long lastGpsUpdateTime = 0;
+static unsigned long lastWiFiUpdateTime = 0;
+static unsigned long lastWiFiReconnectAttemptTime = 0;
 // http data
 static bool foundISSbyWifi = false;
 static uint8_t findISSbyWifiAttempts = 0;
@@ -107,7 +111,7 @@ void lcdSetSecondLine(String secondLineText) {
   lcd.setCursor(0, 1);
   lcd.print("                ");
   lcd.setCursor(0, 1);
-  lcd.print(secondLineText);
+  lcd.print(secondLineText); 
 }
 
 void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
@@ -132,7 +136,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     return;
   }
   
-  unsigned long modeTime = ( currentTime / LCD_MODE_INTERVAL) % 5;
+  unsigned long modeTime = ( currentTime / LCD_UPDATE_INTERVAL) % 5;
   
   switch(modeTime) {
     case 0: // ISS status and range
@@ -426,7 +430,6 @@ void parseDeclinationJsonResponse(String jsonString) {
         Serial.print("Magnetic Declination: ");
         Serial.print(magneticDeclination, 5);
         Serial.println("°");
-        lastDeclinationUpdateTime = millis();
       }
     }
   } else {
@@ -518,11 +521,21 @@ void connectToWiFi() {
     Serial.println();
     Serial.println("WiFi connected!");
     Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
+    Serial.println(WiFi.localIP()); // TODO: check if this works with R4
     Serial.print("Signal strength (RSSI): ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
     lcdSetSecondLine("OK");
+
+    // Dummy HTTP request to wake up ESP32
+    Serial.println("Sending dummy data to wake up ESP32");
+    WiFiSSLClient client;
+    client.connect("google.com", 443);
+    client.println("GET / HTTP/1.1");
+    client.println("Host: google.com");
+    client.println("Connection: close");
+    client.println();
+    client.stop();
   }
 }
 
@@ -625,6 +638,10 @@ void moveAzimuthTo(float targetAzimuth) {
     angleDifference -= 360;
   } else if (angleDifference < -180) {
     angleDifference += 360;
+  }
+
+  if (abs(angleDifference) >= 20) {
+    lcdSetFirstLine("FINDING ISS");
   }
 
   if (abs(angleDifference) >= 0.5) {
@@ -912,8 +929,8 @@ void setup() {
   if (ENABLE_WIFI) {
     lcdSetFirstLine("WIFI INIT");
     connectToWiFi();
-    lastWiFiReconnectAttempt = millis();
-    while (millis() - lastWiFiReconnectAttempt < 10000) {
+    lastWiFiReconnectAttemptTime = millis();
+    while (millis() - lastWiFiReconnectAttemptTime < 10000) {
       delay(1);
       if (WiFi.status() == WL_CONNECTED) {
         break;
@@ -925,8 +942,8 @@ void setup() {
       wifiReconnectAttempts++;
       lcdSetSecondLine("ATTEMPT " + String(wifiReconnectAttempts));
       connectToWiFi();
-      lastWiFiReconnectAttempt = millis();
-      while (millis() - lastWiFiReconnectAttempt < 15000) {
+      lastWiFiReconnectAttemptTime = millis();
+      while (millis() - lastWiFiReconnectAttemptTime < 15000) {
         delay(1);
         if (WiFi.status() == WL_CONNECTED) {
           break;
@@ -939,16 +956,6 @@ void setup() {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("Sending dummy data to wake up ESP32");
-      // Dummy HTTP request to wake up ESP32
-      WiFiSSLClient client;
-      client.connect("google.com", 443);
-      client.println("GET / HTTP/1.1");
-      client.println("Host: google.com");
-      client.println("Connection: close");
-      client.println();
-      client.stop();
-
       lcdSetSecondLine("FETCH ISS TLE");
       while (!foundISSbyWifi && findISSbyWifiAttempts < 3) {
         findISSbyWifiAttempts++;
@@ -986,6 +993,7 @@ void setup() {
   compass.init();
   delay(2000);
 
+  // Initial compass calibration
   recalibrateAzimuth();
   previousCompassHeading = getCompassHeading();
   lastCompassCheckTime = millis();
@@ -996,13 +1004,46 @@ void setup() {
 void loop() {
   currentTime = millis();
 
+  // update the time and location every 30 seconds
+  if (ENABLE_GPS) {
+    if (currentTime - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) { 
+      while (GPS_SERIAL.available()) {
+        gps.encode(GPS_SERIAL.read());
+      }
+      lastGpsUpdateTime = currentTime;
+      if (gps.date.isValid()) {
+        year = gps.date.year();
+        month = gps.date.month();
+        day = gps.date.day();
+        hour = gps.time.hour();
+        minute = gps.time.minute();
+        second = gps.time.second();
+      }
+      if (gps.location.isValid()) {
+        observerAltitude = gps.altitude.kilometers();
+        observerLatitude = gps.location.lat();
+        observerLongitude = gps.location.lng();
+      }
+    }
+  }
+
+  // update the TLE and declination every hour
+  if (ENABLE_WIFI) {
+    if (currentTime - lastWiFiUpdateTime >= WIFI_UPDATE_INTERVAL) {
+      if (WiFi.status() != WL_CONNECTED) {
+        connectToWiFi();
+      }
+      makeTleApiRequest();
+      makeDeclinationApiRequest();
+    }
+  }
+
   // Check for compass jumps indicating the tracker was moved
   if (checkForCompassJump()) {
     recalibrateAzimuth();
-    return;  // Skip this loop iteration to allow recalibration to complete
+    return;
   }
 
-  // DEBUG: Print current time being used
   if (ENABLE_LOG) {
     Serial.println("=== DEBUG INFO ===");
     Serial.print("Current time: ");
@@ -1021,7 +1062,6 @@ void loop() {
   double jdnow;
   jday(year, month, day, hour, minute, second, jdnow);
   
-  // DEBUG: Print Julian day calculations
   if (ENABLE_LOG) {
     Serial.print("Julian day now: ");
     Serial.println(jdnow, 8);
@@ -1031,7 +1071,6 @@ void loop() {
   
   double tsince = (jdnow - satrec.jdsatepoch) * 24.0 * 60.0;
   
-  // DEBUG: Print time since epoch
   if (ENABLE_LOG) {
     Serial.print("Time since epoch (minutes): ");
     Serial.println(tsince, 2);
@@ -1049,7 +1088,6 @@ void loop() {
     return;
   }
 
-  // DEBUG: Print SGP4 position results
   if (ENABLE_LOG) {
     Serial.print("SGP4 position (km): ");
     Serial.print(ro[0], 3); Serial.print(", ");
@@ -1060,7 +1098,6 @@ void loop() {
   double razel[3], razelrates[3];
   rv2azel(ro, vo, observerLatitude * DEG_2_RAD, observerLongitude * DEG_2_RAD, observerAltitude, jdnow, razel, razelrates);
 
-  // DEBUG: Print raw razel results
   if (ENABLE_LOG) {
     Serial.print("Raw razel: ");
     Serial.print(razel[0], 3); Serial.print(" km, ");
@@ -1090,7 +1127,7 @@ void loop() {
   moveAzimuthTo((float)azimuth_deg);
 
   // Update LCD less frequently to reduce I2C interference
-  if (currentTime - lastLcdUpdateTime >= LCD_MODE_INTERVAL) {
+  if (currentTime - lastLcdUpdateTime >= LCD_UPDATE_INTERVAL) {
     updateLCD(azimuth_deg, elevation_deg, range_km);
     lastLcdUpdateTime = currentTime;
   }
