@@ -69,3 +69,7 @@ Total cost: ≈ $400
 
 Inspired by 
 [Grady Hillhouse's ISS tracking pointer](https://github.com/gradyh/ISS-Tracking-Pointer/tree/master), as seen on [Youtube](https://www.youtube.com/watch?v=sIE0mcOGnms).
+
+# Troubleshooting
+
+Can't open the project? Open it in VS-Code and install the `svnty.vscode-arduino-intellisense` VS-Code extension.

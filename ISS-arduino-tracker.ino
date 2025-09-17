@@ -59,7 +59,7 @@ static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000;  // 5 seconds
 // wifi
 static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000;  // 1 hour
 // gps
-static const unsigned long GPS_UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
+static const unsigned long GPS_UPDATE_INTERVAL = 10 * 60 * 1000; // 10 minutes
 static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000; // 1 minute
 
 // -------- VARIABLES --------
