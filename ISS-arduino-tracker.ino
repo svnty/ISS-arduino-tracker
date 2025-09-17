@@ -69,6 +69,7 @@ static unsigned long lastGpsUpdateTime = 0;
 static unsigned long lastWiFiUpdateTime = 0;
 static unsigned long lastWiFiReconnectAttemptTime = 0;
 static unsigned long gpsTimeoutTimer = 0;
+static unsigned long lastTimeUpdateMillis = 0;
 // http data
 static bool foundISSbyWifi = false;
 static uint8_t findISSbyWifiAttempts = 0;
@@ -81,6 +82,9 @@ static char tle_line2[70];
 static double observerLatitude = 0.0, observerLongitude = 0.0, observerAltitude = 0.0;
 static int year, month, day, hour, minute, second;
 static bool isGpsFixed = false;
+static uint32_t gpsDateAge = 0;
+static uint32_t gpsTimeAge = 0;
+static uint32_t gpsLocationAge = 0;
 // motor control
 static float currentAzimuth = 0.0;
 static float currentElevation = 95.0;
@@ -248,7 +252,6 @@ void makeTleApiRequest() {
   const unsigned long timeoutLimit = 10000;  // 10 second timeout
 
   while ((client.connected() || client.available()) && (millis() - timeout < timeoutLimit)) {
-    i2cBusCheck();
     if (client.available()) {
       String line = client.readStringUntil('\n');
 
@@ -368,7 +371,6 @@ void makeDeclinationApiRequest() {
   const unsigned long timeoutLimit = 10000;
 
   while ((client.connected() || client.available()) && (millis() - timeout < timeoutLimit)) {
-    i2cBusCheck();
     if (client.available()) {
       String line = client.readStringUntil('\n');
 
@@ -880,6 +882,15 @@ void setup() {
       lcdSetSecondLine("NO DATE");
       delay(2000);
     }
+
+    if (gps.time.isUpdated()) {
+      lcdSetSecondLine("TIME OK");
+      delay(2000);
+    } else {
+      lcdSetSecondLine("NO TIME");
+      delay(2000);
+    }
+    
     lcdClear();
   }
 
@@ -905,7 +916,6 @@ void setup() {
     connectToWiFi();
     lastWiFiReconnectAttemptTime = millis();
     while (millis() - lastWiFiReconnectAttemptTime < 10000) {
-      i2cBusCheck();
       delay(1);
       if (WiFi.status() == WL_CONNECTED) {
         break;
@@ -914,13 +924,11 @@ void setup() {
     int wifiReconnectAttempts = 1;
 
     while (WiFi.status() != WL_CONNECTED) {
-      i2cBusCheck();
       wifiReconnectAttempts++;
       lcdSetSecondLine("ATTEMPT " + String(wifiReconnectAttempts));
       connectToWiFi();
       lastWiFiReconnectAttemptTime = millis();
       while (millis() - lastWiFiReconnectAttemptTime < 15000) {
-        i2cBusCheck();
         delay(1);
         if (WiFi.status() == WL_CONNECTED) {
           break;
@@ -935,14 +943,12 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
       lcdSetSecondLine("FETCH ISS TLE");
       while (!foundISSbyWifi && findISSbyWifiAttempts < 3) {
-        i2cBusCheck();
         findISSbyWifiAttempts++;
         makeTleApiRequest();
       }
 
       lcdSetSecondLine("FETCH DECLINATION");
       while (!foundDeclinationByWifi && findDeclinationByWifiAttempts < 3) {
-        i2cBusCheck();
         findDeclinationByWifiAttempts++;
         makeDeclinationApiRequest();
       }
@@ -973,16 +979,60 @@ void setup() {
   lcdClear();
 }
 
+void updateLocalTime() {
+  unsigned long currentMillis = millis();
+
+  // If this is the first time or if millis() has rolled over, initialize
+  if (lastTimeUpdateMillis == 0 || currentMillis < lastTimeUpdateMillis) {
+    lastTimeUpdateMillis = currentMillis;
+    return;
+  }
+
+  // Calculate elapsed seconds since last update
+  unsigned long elapsedMillis = currentMillis - lastTimeUpdateMillis;
+  unsigned long elapsedSeconds = elapsedMillis / 1000;
+
+  if (elapsedSeconds > 0) {
+    // Update the time variables
+    second += elapsedSeconds;
+
+    // Handle seconds overflow
+    if (second >= 60) {
+      minute += second / 60;
+      second = second % 60;
+    }
+
+    // Handle minutes overflow
+    if (minute >= 60) {
+      hour += minute / 60;
+      minute = minute % 60;
+    }
+
+    // Handle hours overflow (24-hour format)
+    if (hour >= 24) {
+      hour = hour % 24;
+      // Note: We're not updating day/month/year here since that would
+      // require more complex calendar logic. GPS updates every 10 minutes
+      // should handle date changes adequately.
+    }
+
+    // Update the timestamp
+    lastTimeUpdateMillis = currentMillis;
+  }
+}
+
 void updateGPSData() {
   gpsTimeoutTimer = millis();
+
   if (!isGpsFixed) {
-    while (!gps.location.isValid() || !gps.date.isValid()) {
-      i2cBusCheck();
+    while (!gps.location.isValid() && !gps.date.isValid()) {
       if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
+        if (ENABLE_LOG) {
+          Serial.println("GPS timeout waiting for initial fix");
+        }
         break;
       }
       while (GPS_SERIAL.available()) {
-        i2cBusCheck();
         char c = GPS_SERIAL.read();
         if (ENABLE_LOG) {
           Serial.write(c);
@@ -991,16 +1041,26 @@ void updateGPSData() {
       }
     }
   } else {
-    while (GPS_SERIAL.available()) {
-      i2cBusCheck();
-      char c = GPS_SERIAL.read();
-      if (ENABLE_LOG) {
-        Serial.write(c);
+    // Wait for fresh GPS data (data that's newer than what we started with)
+    while (!(gps.date.age() >= gpsDateAge) && !(gps.time.age() >= gpsTimeAge) && !(gps.location.age() >= gpsLocationAge)) {
+      if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
+        if (ENABLE_LOG) {
+          Serial.println("GPS timeout waiting for fresh data");
+        }
+        isGpsFixed = false;
+        break;
       }
-      gps.encode(c);
+      while (GPS_SERIAL.available()) {
+        char c = GPS_SERIAL.read();
+        if (ENABLE_LOG) {
+          Serial.write(c);
+        }
+        gps.encode(c);
+      }
     }
   }
 
+  // Update our variables with the current GPS data (fresh or existing)
   if (gps.date.isValid()) {
     year = gps.date.year();
     month = gps.date.month();
@@ -1008,15 +1068,35 @@ void updateGPSData() {
     hour = gps.time.hour();
     minute = gps.time.minute();
     second = gps.time.second();
+    // Reset local time tracking since we have GPS time
+    lastTimeUpdateMillis = millis();
+    gpsDateAge = gps.date.age();
+    gpsTimeAge = gps.time.age();
+    gpsLocationAge = gps.location.age();
+
+    if (ENABLE_LOG) {
+      Serial.print("GPS time data age: ");
+      Serial.print(gps.time.age());
+      Serial.println(" ms");
+    }
   }
+
   if (gps.location.isValid()) {
     observerAltitude = gps.altitude.kilometers();
     observerLatitude = gps.location.lat();
     observerLongitude = gps.location.lng();
+
+    if (ENABLE_LOG) {
+      Serial.print("GPS location data age: ");
+      Serial.print(gps.location.age());
+      Serial.println(" ms");
+    }
   }
+
   if (gps.location.isValid() && gps.date.isValid()) {
     isGpsFixed = true;
   }
+
   if (ENABLE_LOG) {
     Serial.println();
     Serial.print("GPS Date: ");
@@ -1043,6 +1123,7 @@ void updateGPSData() {
 
 void loop() {
   i2cBusCheck();
+  updateLocalTime();
 
   // update GPS data every hour
   if (ENABLE_GPS) {
