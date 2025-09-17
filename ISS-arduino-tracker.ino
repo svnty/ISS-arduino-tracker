@@ -45,7 +45,7 @@ static const float COMPASS_JUMP_THRESHOLD = 5.0; // degrees
 static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000; // 5 seconds
 // lcd
 static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000; // 5 seconds
-// wifi 
+// wifi
 static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
 // gps
 static const unsigned long GPS_UPDATE_INTERVAL = 30 * 1000; // 30 seconds 
@@ -78,8 +78,8 @@ static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
 static unsigned long compassLastCalibrate = 0;
 // i2c
-uint8_t i2cDeviceAddresses[MAX_i2c_DEVICES];
-uint8_t i2cDeviceCount = 0;
+static uint8_t i2cDeviceAddresses[MAX_i2c_DEVICES];
+static uint8_t i2cDeviceCount = 0;
 // lcd
 static unsigned long lcdDisplayMode = 0;
 
@@ -92,7 +92,6 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 QMC5883LCompass compass;
 elsetrec satrec;
 Servo elevation;
-WiFiSSLClient sslClient;
 
 // -------- FUNCTIONS --------
 void lcdClear() {
@@ -138,18 +137,15 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     return;
   }
   
-  unsigned long modeTime = ( currentTime / LCD_UPDATE_INTERVAL) % 5;
+  unsigned long modeTime = ( currentTime / LCD_UPDATE_INTERVAL) % 6;
   
   switch(modeTime) {
     case 0: // ISS status and range
-      if (range_km < 1000) {
-        lcdSetFirstLine("ISS DISTANCE");
+      lcdSetFirstLine("ISS DISTANCE");
+      {  
         char buffer[16];
         snprintf(buffer, sizeof(buffer), "Range: %03.0fkm", range_km);
         lcdSetSecondLine(buffer);
-      } else {
-        lcdSetFirstLine("ISS");
-        lcdSetSecondLine("BELOW HORIZON");
       }
       break;
     case 1: // Observer location
@@ -184,6 +180,10 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
         snprintf(buffer, sizeof(buffer), "Az:%03.0f E:%0.0fkm", azimuth_deg, elevation_deg);
         lcdSetSecondLine(buffer);
       }
+      break;
+    case 5:
+      lcdSetFirstLine("ISS");
+      lcdSetSecondLine("BELOW HORIZON");
       break;
   }
 }
