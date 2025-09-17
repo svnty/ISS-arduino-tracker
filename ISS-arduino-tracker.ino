@@ -598,7 +598,7 @@ float calculateAngleDifference(float angle1, float angle2) {
   } else if (diff < -180) {
     diff += 360;
   }
-  return abs(diff);
+  return fabs(diff);
 }
 
 void recalibrateAzimuth() {
@@ -616,7 +616,7 @@ void recalibrateAzimuth() {
     Serial.println(currentHeading);
 
     // Check if we're close to north (0 degrees)
-    if (abs(currentHeading) <= 0.5 || abs(currentHeading) >= 359.5) {
+    if (fabs(currentHeading) <= 0.5 || fabs(currentHeading) >= 359.5) {
       break;
     }
 
@@ -659,7 +659,7 @@ bool checkForCompassJump() {
 
   if (millis() - lastCompassCheckTime >= COMPASS_CHECK_INTERVAL) {
     lastCompassCheckTime = millis();
-    if (abs(calculateAngleDifference(currentHeading, previousCompassHeading)) >= COMPASS_JUMP_THRESHOLD) {
+    if (fabs(calculateAngleDifference(currentHeading, previousCompassHeading)) >= COMPASS_JUMP_THRESHOLD) {
       previousCompassHeading = currentHeading;
       return true;
     }
@@ -680,12 +680,12 @@ void moveAzimuthTo(float targetAzimuth) {
     angleDifference += 360;
   }
 
-  if (abs(angleDifference) >= 10) {
+  if (fabs(angleDifference) >= 10.0F) {
     lcdClear();
     lcdSetFirstLine("FINDING ISS");
   }
 
-  if (abs(angleDifference) > 1.0) {
+  if (fabs(angleDifference) > 0.5) {
     // Calculate direction ONCE at the beginning based on initial heading
     float initialHeading = getCompassHeading();
     float initialDifference = targetAzimuth - initialHeading;
@@ -698,7 +698,7 @@ void moveAzimuthTo(float targetAzimuth) {
     }
 
     // Determine direction and stick with it
-    bool moveClockwise = (initialDifference > 0);
+    bool moveCounterClockwise = (initialDifference > 0);
 
     Serial.print("moveAzimuthTo - Initial heading: ");
     Serial.println(initialHeading);
@@ -707,9 +707,9 @@ void moveAzimuthTo(float targetAzimuth) {
     Serial.print("moveAzimuthTo - Initial difference: ");
     Serial.println(initialDifference);
     Serial.print("moveAzimuthTo - Direction chosen: ");
-    Serial.println(moveClockwise ? "COUNTER-CLOCKWISE" : "CLOCKWISE");
+    Serial.println(moveCounterClockwise ? "COUNTER-CLOCKWISE" : "CLOCKWISE");
 
-    digitalWrite(AZIMUTH_DIR_PIN, moveClockwise ? LOW : HIGH);
+    digitalWrite(AZIMUTH_DIR_PIN, moveCounterClockwise ? LOW : HIGH);
 
     while (true) {
       i2cBusCheck();
@@ -730,9 +730,9 @@ void moveAzimuthTo(float targetAzimuth) {
       }
 
       digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-      delayMicroseconds(fabs(headingDifference) > 20.0F ? 20 : 1000);  // VERY fast stepping if far away
+      delayMicroseconds(fabs(headingDifference) > 20.0F ? 200 : 1000);  // fast stepping if far away
       digitalWrite(AZIMUTH_STEP_PIN, LOW);
-      delayMicroseconds(fabs(headingDifference) > 20.0F ? 20 : 1000);  // VERY fast stepping if far away
+      delayMicroseconds(fabs(headingDifference) > 20.0F ? 200 : 1000);  // fast stepping if far away
     }
 
     float finalHeading = getCompassHeading();
@@ -757,7 +757,7 @@ void moveElevationTo(float targetElevation) {
   if (targetElevation < 0) {
     // ISS is below horizon, point down at it
     // Convert negative elevation to servo position below horizon
-    servoPosition = 90 + abs(targetElevation);
+    servoPosition = 90 + fabs(targetElevation);
 
     // Constrain to maximum downward angle (180°)
     if (servoPosition > 180) servoPosition = 180;
@@ -770,7 +770,7 @@ void moveElevationTo(float targetElevation) {
   }
 
   // Only move if the difference is significant (>= 1 degree)
-  if (abs(servoPosition - currentElevation) >= 1.0) {
+  if (fabs(servoPosition - currentElevation) >= 1.0) {
     elevation.write((int)servoPosition);
     currentElevation = servoPosition;
 
