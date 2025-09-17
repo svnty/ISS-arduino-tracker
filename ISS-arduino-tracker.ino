@@ -83,7 +83,6 @@ static double observerLatitude = 0.0, observerLongitude = 0.0, observerAltitude 
 static int year, month, day, hour, minute, second;
 static bool isGpsFixed = false;
 static uint32_t gpsDateAge = 0;
-static uint32_t gpsTimeAge = 0;
 static uint32_t gpsLocationAge = 0;
 // motor control
 static float currentAzimuth = 0.0;
@@ -184,7 +183,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
       {
         char buffer[16];
         float compassHeading = getCompassHeading();
-        snprintf(buffer, sizeof(buffer), "C:%03.0f M:%03.0f", compassHeading, currentAzimuth);
+        snprintf(buffer, sizeof(buffer), "C:%05.2f M:%05.2f", compassHeading, currentAzimuth);
         lcdSetSecondLine(buffer);
       }
       break;
@@ -192,7 +191,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
       lcdSetFirstLine("ISS DIRECTION");
       {
         char buffer[16];
-        snprintf(buffer, sizeof(buffer), "Az:%03.0f E:%0.0fkm", azimuth_deg, elevation_deg);
+        snprintf(buffer, sizeof(buffer), "Az:%06.2f E:%0.0fkm", azimuth_deg, elevation_deg);
         lcdSetSecondLine(buffer);
       }
       break;
@@ -547,11 +546,20 @@ void connectToWiFi() {
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+  unsigned long startTime = millis();
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - startTime >= 15 * 1000) {
+      break;
+    }
+    delay(500);
+  }
+  
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println();
     Serial.println("WiFi connected!");
     Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());  // TODO: check if this works with R4
+    Serial.println(WiFi.localIP());
     Serial.print("Signal strength (RSSI): ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
@@ -560,12 +568,14 @@ void connectToWiFi() {
     // Dummy HTTP request to wake up ESP32
     Serial.println("Sending dummy data to wake up ESP32");
     WiFiSSLClient client;
-    client.connect("google.com", 443);
-    client.println("GET / HTTP/1.1");
-    client.println("Host: google.com");
-    client.println("Connection: close");
-    client.println();
-    client.stop();
+    if (client.connect("google.com", 443)) {
+      client.println("GET / HTTP/1.1");
+      client.println("Host: google.com");
+      client.println("Connection: close");
+      client.println();
+      client.stop();
+      Serial.println("ESP32 wake-up request sent");
+    }
   }
 }
 
@@ -659,6 +669,7 @@ bool checkForCompassJump() {
 }
 
 void moveAzimuthTo(float targetAzimuth) {
+  lcdClear();
   // Apply offset to target azimuth so movement is corrected
   float angleDifference = targetAzimuth - currentAzimuth;
   float currentHeading = 0.0;
@@ -674,7 +685,7 @@ void moveAzimuthTo(float targetAzimuth) {
     lcdSetFirstLine("FINDING ISS");
   }
 
-  if (abs(angleDifference) >= 0.5) {
+  if (abs(angleDifference) > 0.5) {
     // Calculate direction ONCE at the beginning based on initial heading
     float initialHeading = getCompassHeading();
     float initialDifference = targetAzimuth - initialHeading;
@@ -696,9 +707,9 @@ void moveAzimuthTo(float targetAzimuth) {
     Serial.print("moveAzimuthTo - Initial difference: ");
     Serial.println(initialDifference);
     Serial.print("moveAzimuthTo - Direction chosen: ");
-    Serial.println(moveClockwise ? "CLOCKWISE" : "COUNTER-CLOCKWISE");
+    Serial.println(moveClockwise ? "COUNTER-CLOCKWISE" : "CLOCKWISE");
 
-    digitalWrite(AZIMUTH_DIR_PIN, moveClockwise ? HIGH : LOW);
+    digitalWrite(AZIMUTH_DIR_PIN, moveClockwise ? LOW : HIGH);
 
     while (true) {
       i2cBusCheck();
@@ -741,10 +752,6 @@ void moveAzimuthTo(float targetAzimuth) {
     Serial.println(currentAzimuth);
 
     previousCompassHeading = currentHeading;
-
-    // Normalize to 0-360 range
-    if (currentAzimuth < 0) currentAzimuth += 360;
-    if (currentAzimuth >= 360) currentAzimuth -= 360;
   }
 }
 
@@ -882,14 +889,6 @@ void setup() {
       lcdSetSecondLine("NO DATE");
       delay(2000);
     }
-
-    if (gps.time.isUpdated()) {
-      lcdSetSecondLine("TIME OK");
-      delay(2000);
-    } else {
-      lcdSetSecondLine("NO TIME");
-      delay(2000);
-    }
     
     lcdClear();
   }
@@ -904,7 +903,7 @@ void setup() {
     Serial.println("Gps date: INVALID");
     year = 2025;
     month = 9;
-    day = 17;
+    day = 18;
     hour = 12;
     minute = 0;
     second = 0;
@@ -914,26 +913,13 @@ void setup() {
   if (ENABLE_WIFI) {
     lcdSetFirstLine("WIFI INIT");
     connectToWiFi();
-    lastWiFiReconnectAttemptTime = millis();
-    while (millis() - lastWiFiReconnectAttemptTime < 10000) {
-      delay(1);
-      if (WiFi.status() == WL_CONNECTED) {
-        break;
-      }
-    }
+
     int wifiReconnectAttempts = 1;
 
     while (WiFi.status() != WL_CONNECTED) {
       wifiReconnectAttempts++;
       lcdSetSecondLine("ATTEMPT " + String(wifiReconnectAttempts));
       connectToWiFi();
-      lastWiFiReconnectAttemptTime = millis();
-      while (millis() - lastWiFiReconnectAttemptTime < 15000) {
-        delay(1);
-        if (WiFi.status() == WL_CONNECTED) {
-          break;
-        }
-      }
       if (wifiReconnectAttempts >= 3) {
         lcdSetSecondLine("ERROR");
         break;
@@ -1025,7 +1011,7 @@ void updateGPSData() {
   gpsTimeoutTimer = millis();
 
   if (!isGpsFixed) {
-    while (!gps.location.isValid() && !gps.date.isValid()) {
+    while (!gps.location.isValid() || !gps.date.isValid()) {
       if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
         if (ENABLE_LOG) {
           Serial.println("GPS timeout waiting for initial fix");
@@ -1042,7 +1028,7 @@ void updateGPSData() {
     }
   } else {
     // Wait for fresh GPS data (data that's newer than what we started with)
-    while (!(gps.date.age() >= gpsDateAge) && !(gps.time.age() >= gpsTimeAge) && !(gps.location.age() >= gpsLocationAge)) {
+    while (!(gps.date.age() >= gpsDateAge) || !(gps.location.age() >= gpsLocationAge)) {
       if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
         if (ENABLE_LOG) {
           Serial.println("GPS timeout waiting for fresh data");
@@ -1071,7 +1057,6 @@ void updateGPSData() {
     // Reset local time tracking since we have GPS time
     lastTimeUpdateMillis = millis();
     gpsDateAge = gps.date.age();
-    gpsTimeAge = gps.time.age();
     gpsLocationAge = gps.location.age();
 
     if (ENABLE_LOG) {
