@@ -63,3 +63,8 @@ Total cost: ≈ $400
 <p align="center">
   <img src="https://raw.githubusercontent.com/svnty/ISS-arduino-tracker/refs/heads/main/images/img2.png?raw=true" alt="International Space Station Orbit Tracker"/>
 </p>
+
+# Credits
+
+Inspired by 
+[Grady Hillhouse's ISS tracking pointer](https://github.com/gradyh/ISS-Tracking-Pointer/tree/master), as seen on [Youtube](https://www.youtube.com/watch?v=sIE0mcOGnms).
