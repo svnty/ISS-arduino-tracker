@@ -136,7 +136,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
 
   if (issOverhead) {
     lcdSetFirstLine("ISS OVERHEAD!");
-    char buffer[16];
+    char buffer[17];
     snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
     lcdSetSecondLine(buffer);
     return;
@@ -145,7 +145,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
   // If ISS is visible but not overhead, show ISS info
   if (elevation_deg > 0) {
     lcdSetFirstLine("ISS VISIBLE");
-    char buffer[16];
+    char buffer[17];
     snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
     lcdSetSecondLine(buffer);
     return;
@@ -157,7 +157,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     case 0:  // ISS status and range
       lcdSetFirstLine("ISS DISTANCE");
       {
-        char buffer[16];
+        char buffer[17];
         snprintf(buffer, sizeof(buffer), "%03.0f km", range_km);
         lcdSetSecondLine(buffer);
       }
@@ -165,7 +165,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     case 1:  // Observer location
       lcdSetFirstLine("OBSERVER LOCATION");
       {
-        char buffer[16];
+        char buffer[17];
         snprintf(buffer, sizeof(buffer), "%.2f,%.2f", observerLatitude, observerLongitude);
         lcdSetSecondLine(buffer);
       }
@@ -173,7 +173,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     case 2:  // Current time
       lcdSetFirstLine("TIME (UTC)");
       {
-        char buffer[16];
+        char buffer[17];
         snprintf(buffer, sizeof(buffer), "%02d:%02d %d/%d/%02d", hour, minute, day, month, (year % 100));
         lcdSetSecondLine(buffer);
       }
@@ -181,17 +181,17 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     case 3:  // Compass heading and motor position
       lcdSetFirstLine("COMPASS/MOTOR");
       {
-        char buffer[16];
+        char buffer[17];
         float compassHeading = getCompassHeading();
-        snprintf(buffer, sizeof(buffer), "C:%05.2f M:%05.2f", compassHeading, currentAzimuth);
+        snprintf(buffer, sizeof(buffer), "C:%05.1f M:%05.1f", compassHeading, currentAzimuth);
         lcdSetSecondLine(buffer);
       }
       break;
     case 4:  // ISS current azimuth (even when below horizon)
       lcdSetFirstLine("ISS DIRECTION");
       {
-        char buffer[16];
-        snprintf(buffer, sizeof(buffer), "Az:%06.2f E:%0.0fkm", azimuth_deg, elevation_deg);
+        char buffer[17];
+        snprintf(buffer, sizeof(buffer), "Az:%03.0f E:%0.0fkm", azimuth_deg, elevation_deg);
         lcdSetSecondLine(buffer);
       }
       break;
@@ -715,9 +715,6 @@ void moveAzimuthTo(float targetAzimuth) {
       i2cBusCheck();
       currentHeading = getCompassHeading();
 
-      Serial.print("moveAzimuthTo - Current heading:");
-      Serial.println(currentHeading);
-
       // Calculate current difference to target
       float headingDifference = targetAzimuth - currentHeading;
       // Handle wraparound for heading difference
@@ -727,18 +724,15 @@ void moveAzimuthTo(float targetAzimuth) {
         headingDifference += 360;
       }
 
-      Serial.println("moveAzimuthTo - Heading difference: " + String(headingDifference));
-
       // Check if close enough to target
-      if (abs(headingDifference) <= 0.5) {
+      if (fabs(headingDifference) <= 0.5) {
         break;
       }
 
-      // Take step in the predetermined direction (NO direction recalculation)
       digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-      delayMicroseconds(1000);
+      delayMicroseconds(fabs(headingDifference) > 20.0F ? 20 : 1000);  // VERY fast stepping if far away
       digitalWrite(AZIMUTH_STEP_PIN, LOW);
-      delayMicroseconds(1000);
+      delayMicroseconds(fabs(headingDifference) > 20.0F ? 20 : 1000);  // VERY fast stepping if far away
     }
 
     float finalHeading = getCompassHeading();
@@ -1060,7 +1054,7 @@ void updateGPSData() {
     gpsLocationAge = gps.location.age();
 
     if (ENABLE_LOG) {
-      Serial.print("GPS time data age: ");
+      Serial.println("GPS time data age: ");
       Serial.print(gps.time.age());
       Serial.println(" ms");
     }
@@ -1072,7 +1066,7 @@ void updateGPSData() {
     observerLongitude = gps.location.lng();
 
     if (ENABLE_LOG) {
-      Serial.print("GPS location data age: ");
+      Serial.println("GPS location data age: ");
       Serial.print(gps.location.age());
       Serial.println(" ms");
     }
