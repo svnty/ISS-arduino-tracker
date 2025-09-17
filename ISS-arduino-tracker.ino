@@ -51,16 +51,16 @@ static const uint16_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
-static const float COMPASS_AZIMUTH_OFFSET = 180 + 17; // degrees
-static const float COMPASS_JUMP_THRESHOLD = 5.0; // degrees
+static const float COMPASS_AZIMUTH_OFFSET = 180 + 17;          // degrees
+static const float COMPASS_JUMP_THRESHOLD = 5.0;               // degrees
 static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000;  // 5 seconds
 // lcd
 static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000;  // 5 seconds
 // wifi
 static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000;  // 1 hour
 // gps
-static const unsigned long GPS_UPDATE_INTERVAL = 10 * 60 * 1000; // 10 minutes
-static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000; // 1 minute
+static const unsigned long GPS_UPDATE_INTERVAL = 10 * 60 * 1000;  // 10 minutes
+static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000;      // 1 minute
 
 // -------- VARIABLES --------
 // timers
@@ -975,11 +975,22 @@ void setup() {
 
 void updateGPSData() {
   gpsTimeoutTimer = millis();
-  while (!gps.location.isValid() || !gps.date.isValid()) {
-    i2cBusCheck();
-    if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
-      break;
+  if (!isGpsFixed) {
+    while (!gps.location.isValid() || !gps.date.isValid()) {
+      i2cBusCheck();
+      if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
+        break;
+      }
+      while (GPS_SERIAL.available()) {
+        i2cBusCheck();
+        char c = GPS_SERIAL.read();
+        if (ENABLE_LOG) {
+          Serial.write(c);
+        }
+        gps.encode(c);
+      }
     }
+  } else {
     while (GPS_SERIAL.available()) {
       i2cBusCheck();
       char c = GPS_SERIAL.read();
