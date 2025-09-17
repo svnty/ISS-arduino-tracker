@@ -669,7 +669,6 @@ bool checkForCompassJump() {
 }
 
 void moveAzimuthTo(float targetAzimuth) {
-  lcdClear();
   // Apply offset to target azimuth so movement is corrected
   float angleDifference = targetAzimuth - currentAzimuth;
   float currentHeading = 0.0;
@@ -682,10 +681,11 @@ void moveAzimuthTo(float targetAzimuth) {
   }
 
   if (abs(angleDifference) >= 10) {
+    lcdClear();
     lcdSetFirstLine("FINDING ISS");
   }
 
-  if (abs(angleDifference) > 0.5) {
+  if (abs(angleDifference) > 1.0) {
     // Calculate direction ONCE at the beginning based on initial heading
     float initialHeading = getCompassHeading();
     float initialDifference = targetAzimuth - initialHeading;
