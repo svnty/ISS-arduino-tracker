@@ -1,3 +1,14 @@
+/**
+ * International Space Station (ISS) orbit tracker
+ * Tracks the ISS using TLE data from Celestrak, observer location from GPS,
+ * magnetic declination from NOAA, and points a motorized antenna mount
+ * towards the ISS.
+ * 
+ * @author svnty (Jake Walklate)
+ * @date September 2025
+ * @copyright © 2025 Jake Walklate
+ */
+
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LiquidCrystal_I2C.h>
@@ -142,11 +153,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
   switch(modeTime) {
     case 0: // ISS status and range
       lcdSetFirstLine("ISS DISTANCE");
-      {  
-        char buffer[16];
-        snprintf(buffer, sizeof(buffer), "Range: %03.0fkm", range_km);
-        lcdSetSecondLine(buffer);
-      }
+      lcdSetSecondLine(String(range_km));
       break;
     case 1: // Observer location
       lcdSetFirstLine("OBSERVER LOCATION");
@@ -642,7 +649,7 @@ void moveAzimuthTo(float targetAzimuth) {
     angleDifference += 360;
   }
 
-  if (abs(angleDifference) >= 20) {
+  if (abs(angleDifference) >= 10) {
     lcdSetFirstLine("FINDING ISS");
   }
 
@@ -1014,6 +1021,7 @@ void loop() {
     }
     // Update GPS data every 30 seconds
     if (currentTime - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) {
+      lcdSetFirstLine("UPDATING GPS");
       while (GPS_SERIAL.available()) {
         // if it takes more than 1 minute to get a fix, give up
         if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
@@ -1041,6 +1049,7 @@ void loop() {
   // update the TLE and declination every hour
   if (ENABLE_WIFI) {
     if (currentTime - lastWiFiUpdateTime >= WIFI_UPDATE_INTERVAL) {
+      lcdSetFirstLine("FETCHING DATA");
       if (WiFi.status() != WL_CONNECTED) {
         connectToWiFi();
       }
