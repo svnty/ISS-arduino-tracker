@@ -51,20 +51,19 @@ static const uint16_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
-static const float COMPASS_AZIMUTH_OFFSET = 180 + 17;          // degrees
-static const float COMPASS_JUMP_THRESHOLD = 5.0;               // degrees
+static const float COMPASS_AZIMUTH_OFFSET = 180 + 17; // degrees
+static const float COMPASS_JUMP_THRESHOLD = 5.0; // degrees
 static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000;  // 5 seconds
 // lcd
 static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000;  // 5 seconds
 // wifi
 static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000;  // 1 hour
 // gps
-static const unsigned long GPS_UPDATE_INTERVAL = 30 * 1000;   // 30 seconds
-static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000;  // 1 minute
+static const unsigned long GPS_UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
+static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000; // 1 minute
 
 // -------- VARIABLES --------
 // timers
-static unsigned long currentTime = 0;
 static unsigned long lastLcdUpdateTime = 0;
 static unsigned long lastGpsUpdateTime = 0;
 static unsigned long lastWiFiUpdateTime = 0;
@@ -149,12 +148,16 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     return;
   }
 
-  unsigned long modeTime = (currentTime / LCD_UPDATE_INTERVAL) % 7;
+  unsigned long modeTime = (millis() / LCD_UPDATE_INTERVAL) % 7;
 
   switch (modeTime) {
     case 0:  // ISS status and range
       lcdSetFirstLine("ISS DISTANCE");
-      lcdSetSecondLine(String(range_km));
+      {
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "%03.0f km", range_km);
+        lcdSetSecondLine(buffer);
+      }
       break;
     case 1:  // Observer location
       lcdSetFirstLine("OBSERVER LOCATION");
@@ -621,7 +624,7 @@ void recalibrateAzimuth() {
 
   // Reset our azimuth position tracking
   currentAzimuth = currentHeading;
-  compassLastCalibrate = currentTime;
+  compassLastCalibrate = millis();
 
   lcdSetSecondLine("OK");
   delay(2000);
@@ -636,14 +639,14 @@ bool checkForCompassJump() {
   Serial.print("Previous compass heading: ");
   Serial.println(previousCompassHeading);
 
-  if (currentTime - compassLastCalibrate < 10000) {
+  if (millis() - compassLastCalibrate < 10000) {
     Serial.println("Skipping jump check - within 10s of calibration");
     previousCompassHeading = currentHeading;
     return false;
   }
 
-  if (currentTime - lastCompassCheckTime >= COMPASS_CHECK_INTERVAL) {
-    lastCompassCheckTime = currentTime;
+  if (millis() - lastCompassCheckTime >= COMPASS_CHECK_INTERVAL) {
+    lastCompassCheckTime = millis();
     if (abs(calculateAngleDifference(currentHeading, previousCompassHeading)) >= COMPASS_JUMP_THRESHOLD) {
       previousCompassHeading = currentHeading;
       return true;
@@ -727,7 +730,7 @@ void moveAzimuthTo(float targetAzimuth) {
 
     float finalHeading = getCompassHeading();
     currentAzimuth = finalHeading;
-    compassLastCalibrate = currentTime;
+    compassLastCalibrate = millis();
 
     Serial.println("Finish moveAzimuthTo");
     Serial.print("Previous compass heading: ");
@@ -881,13 +884,13 @@ void setup() {
   }
 
   if (!gps.location.isValid()) {
-    Serial.print("Gps location: INVALID");
+    Serial.println("Gps location: INVALID");
     observerLatitude = -33.88336;
     observerLongitude = 152.20148;
     observerAltitude = 0.035;
   }
   if (!gps.date.isValid()) {
-    Serial.print("Gps date: INVALID");
+    Serial.println("Gps date: INVALID");
     year = 2025;
     month = 9;
     day = 17;
@@ -1029,11 +1032,11 @@ void updateGPSData() {
 
 void loop() {
   i2cBusCheck();
-  currentTime = millis();
 
-  // update GPS data every 30 seconds
+  // update GPS data every hour
   if (ENABLE_GPS) {
-    if (currentTime - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) {
+    if (millis() - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) {
+      lcdClear();
       lcdSetFirstLine("UPDATING GPS");
       updateGPSData();
     }
@@ -1041,7 +1044,9 @@ void loop() {
 
   // update the TLE and declination every hour
   if (ENABLE_WIFI) {
-    if (currentTime - lastWiFiUpdateTime >= WIFI_UPDATE_INTERVAL) {
+    if (millis() - lastWiFiUpdateTime >= WIFI_UPDATE_INTERVAL) {
+      lcdClear();
+      lastWiFiUpdateTime = millis();
       lcdSetFirstLine("FETCHING DATA");
       if (WiFi.status() != WL_CONNECTED) {
         connectToWiFi();
@@ -1132,8 +1137,8 @@ void loop() {
   moveAzimuthTo((float)azimuth_deg);
 
   // Update LCD less frequently to reduce I2C interference
-  if (currentTime - lastLcdUpdateTime >= LCD_UPDATE_INTERVAL) {
+  if (millis() - lastLcdUpdateTime >= LCD_UPDATE_INTERVAL) {
     updateLCD(azimuth_deg, elevation_deg, range_km);
-    lastLcdUpdateTime = currentTime;
+    lastLcdUpdateTime = millis();
   }
 }
