@@ -3,7 +3,7 @@
  * Tracks the ISS using TLE data from Celestrak, observer location from GPS,
  * magnetic declination from NOAA, and points a motorized antenna mount
  * towards the ISS.
- * 
+ *
  * @author svnty (Jake Walklate)
  * @date September 2025
  * @copyright © 2025 Jake Walklate
@@ -51,16 +51,16 @@ static const uint16_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
-static const float COMPASS_AZIMUTH_OFFSET = 180 + 17; // degrees
-static const float COMPASS_JUMP_THRESHOLD = 5.0; // degrees
-static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000; // 5 seconds
+static const float COMPASS_AZIMUTH_OFFSET = 180 + 17;          // degrees
+static const float COMPASS_JUMP_THRESHOLD = 5.0;               // degrees
+static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000;  // 5 seconds
 // lcd
-static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000; // 5 seconds
+static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000;  // 5 seconds
 // wifi
-static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
+static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000;  // 1 hour
 // gps
-static const unsigned long GPS_UPDATE_INTERVAL = 30 * 1000; // 30 seconds 
-static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000; // 1 minute
+static const unsigned long GPS_UPDATE_INTERVAL = 30 * 1000;   // 30 seconds
+static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000;  // 1 minute
 
 // -------- VARIABLES --------
 // timers
@@ -75,15 +75,16 @@ static bool foundISSbyWifi = false;
 static uint8_t findISSbyWifiAttempts = 0;
 static bool foundDeclinationByWifi = false;
 static uint8_t findDeclinationByWifiAttempts = 0;
-static float magneticDeclination = 12.7; // degrees
+static float magneticDeclination = 12.7;  // degrees
 static char tle_line1[70];
 static char tle_line2[70];
 // gps data
 static double observerLatitude = 0.0, observerLongitude = 0.0, observerAltitude = 0.0;
 static int year, month, day, hour, minute, second;
+static bool isGpsFixed = false;
 // motor control
 static float currentAzimuth = 0.0;
-static float currentElevation = 90.0;
+static float currentElevation = 95.0;
 // compass
 static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
@@ -123,14 +124,14 @@ void lcdSetSecondLine(String secondLineText) {
   lcd.setCursor(0, 1);
   lcd.print("                ");
   lcd.setCursor(0, 1);
-  lcd.print(secondLineText); 
+  lcd.print(secondLineText);
 }
 
 void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
   lcdClear();
   // If ISS is overhead (elevation > 10°), always show ISS position
   bool issOverhead = elevation_deg > 10.0;
-  
+
   if (issOverhead) {
     lcdSetFirstLine("ISS OVERHEAD!");
     char buffer[16];
@@ -138,7 +139,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     lcdSetSecondLine(buffer);
     return;
   }
-  
+
   // If ISS is visible but not overhead, show ISS info
   if (elevation_deg > 0) {
     lcdSetFirstLine("ISS VISIBLE");
@@ -147,15 +148,15 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     lcdSetSecondLine(buffer);
     return;
   }
-  
-  unsigned long modeTime = ( currentTime / LCD_UPDATE_INTERVAL) % 6;
-  
-  switch(modeTime) {
-    case 0: // ISS status and range
+
+  unsigned long modeTime = (currentTime / LCD_UPDATE_INTERVAL) % 7;
+
+  switch (modeTime) {
+    case 0:  // ISS status and range
       lcdSetFirstLine("ISS DISTANCE");
       lcdSetSecondLine(String(range_km));
       break;
-    case 1: // Observer location
+    case 1:  // Observer location
       lcdSetFirstLine("OBSERVER LOCATION");
       {
         char buffer[16];
@@ -163,7 +164,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
         lcdSetSecondLine(buffer);
       }
       break;
-    case 2: // Current time
+    case 2:  // Current time
       lcdSetFirstLine("TIME (UTC)");
       {
         char buffer[16];
@@ -171,7 +172,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
         lcdSetSecondLine(buffer);
       }
       break;
-    case 3: // Compass heading and motor position
+    case 3:  // Compass heading and motor position
       lcdSetFirstLine("COMPASS/MOTOR");
       {
         char buffer[16];
@@ -180,7 +181,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
         lcdSetSecondLine(buffer);
       }
       break;
-    case 4: // ISS current azimuth (even when below horizon)
+    case 4:  // ISS current azimuth (even when below horizon)
       lcdSetFirstLine("ISS DIRECTION");
       {
         char buffer[16];
@@ -191,6 +192,18 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
     case 5:
       lcdSetFirstLine("ISS");
       lcdSetSecondLine("BELOW HORIZON");
+      break;
+    case 6:
+      if (isGpsFixed) {
+        lcdSetFirstLine("GPS ACCURATE");
+      } else {
+        lcdSetFirstLine("GPS ERROR");
+      }
+      if (foundISSbyWifi) {
+        lcdSetSecondLine("ISS ACCURATE");
+      } else {
+        lcdSetSecondLine("ISS DATA ERROR");
+      }
       break;
   }
 }
@@ -232,6 +245,7 @@ void makeTleApiRequest() {
   const unsigned long timeoutLimit = 10000;  // 10 second timeout
 
   while ((client.connected() || client.available()) && (millis() - timeout < timeoutLimit)) {
+    i2cBusCheck();
     if (client.available()) {
       String line = client.readStringUntil('\n');
 
@@ -263,10 +277,11 @@ void makeTleApiRequest() {
     foundISSbyWifi = true;
     Serial.println(httpResponse);
     parseTLEData(httpResponse, issIndex);
+  } else {
+    foundISSbyWifi = false;
   }
 
   if (!foundISSbyWifi) {
-    lcdSetSecondLine("TLE ERROR");
     Serial.println("No valid TLE data received!");
     return;
   }
@@ -350,6 +365,7 @@ void makeDeclinationApiRequest() {
   const unsigned long timeoutLimit = 10000;
 
   while ((client.connected() || client.available()) && (millis() - timeout < timeoutLimit)) {
+    i2cBusCheck();
     if (client.available()) {
       String line = client.readStringUntil('\n');
 
@@ -530,7 +546,7 @@ void connectToWiFi() {
     Serial.println();
     Serial.println("WiFi connected!");
     Serial.print("IP address: ");
-    Serial.println(WiFi.localIP()); // TODO: check if this works with R4
+    Serial.println(WiFi.localIP());  // TODO: check if this works with R4
     Serial.print("Signal strength (RSSI): ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
@@ -577,9 +593,9 @@ void recalibrateAzimuth() {
 
   // Rotate until we're pointing north again
   while (true) {
+    i2cBusCheck();
     currentHeading = getCompassHeading();
     previousCompassHeading = currentHeading;
-    i2cBusCheck();
 
     Serial.print("Calibrating - Current heading: ");
     Serial.println(currentHeading);
@@ -657,17 +673,17 @@ void moveAzimuthTo(float targetAzimuth) {
     // Calculate direction ONCE at the beginning based on initial heading
     float initialHeading = getCompassHeading();
     float initialDifference = targetAzimuth - initialHeading;
-    
+
     // Handle wraparound for initial heading difference
     if (initialDifference > 180) {
       initialDifference -= 360;
     } else if (initialDifference < -180) {
       initialDifference += 360;
     }
-    
+
     // Determine direction and stick with it
     bool moveClockwise = (initialDifference > 0);
-    
+
     Serial.print("moveAzimuthTo - Initial heading: ");
     Serial.println(initialHeading);
     Serial.print("moveAzimuthTo - Target azimuth: ");
@@ -676,12 +692,12 @@ void moveAzimuthTo(float targetAzimuth) {
     Serial.println(initialDifference);
     Serial.print("moveAzimuthTo - Direction chosen: ");
     Serial.println(moveClockwise ? "CLOCKWISE" : "COUNTER-CLOCKWISE");
-    
+
     digitalWrite(AZIMUTH_DIR_PIN, moveClockwise ? HIGH : LOW);
-    
+
     while (true) {
-      currentHeading = getCompassHeading();
       i2cBusCheck();
+      currentHeading = getCompassHeading();
 
       Serial.print("moveAzimuthTo - Current heading:");
       Serial.println(currentHeading);
@@ -808,6 +824,7 @@ void i2cBusRecover() {
 // -------- ARDUINO --------
 void setup() {
   Serial.begin(115200);
+  Serial.println("Initializing Serial...");
   Wire.begin();
   i2cBusRecover();
 
@@ -823,6 +840,11 @@ void setup() {
     }
   }
 
+  // Elevation Motor Initialization
+  elevation.attach(ELEVATION_PIN);
+  elevation.write(currentElevation);
+
+  // Azimuth Motor Initialization
   pinMode(AZIMUTH_STEP_PIN, OUTPUT);
   pinMode(AZIMUTH_DIR_PIN, OUTPUT);
   digitalWrite(AZIMUTH_DIR_PIN, HIGH);
@@ -838,97 +860,37 @@ void setup() {
     lcdSetFirstLine("GPS INIT");
     Serial.println("Initializing GPS...");
     GPS_SERIAL.begin(9600);
-    gpsTimeoutTimer = millis();
+    updateGPSData();
 
-    while (!gps.location.isValid()) {
-      if (millis() - gpsTimeoutTimer > GPS_TIMEOUT_INTERVAL) {
-        lcdSetSecondLine("TIMEOUT");
-        delay(2000);
-        break;
-      }
-      while (GPS_SERIAL.available()) {
-        char c = GPS_SERIAL.read();
-        if (ENABLE_LOG) {
-          Serial.write(c);
-        }
-        gps.encode(c);
-      }
-    }
     if (gps.location.isValid()) {
-      observerLatitude = gps.location.lat();
-      observerLongitude = gps.location.lng();
-      // Use GPS altitude if available and reasonable, otherwise use default
-      if (gps.altitude.isValid() && gps.altitude.kilometers() > -0.5 && gps.altitude.kilometers() < 10.0) {
-        observerAltitude = gps.altitude.kilometers();
-      } else {
-        observerAltitude = 0.050; // Default altitude for Sydney area (50m above sea level)
-      }
       lcdSetSecondLine("LOCATION OK");
       delay(2000);
-    }
-
-    while (!gps.date.isValid()) {
-      if (millis() - gpsTimeoutTimer > GPS_TIMEOUT_INTERVAL) {
-        lcdSetSecondLine("TIMEOUT");
-        delay(2000);
-        break;
-      }
-      while (GPS_SERIAL.available()) {
-        char c = GPS_SERIAL.read();
-        if (ENABLE_LOG) {
-          Serial.write(c);
-        }
-        gps.encode(c);
-      }
-    }
-    if (gps.date.isValid()) {
-      year = gps.date.year();
-      month = gps.date.month();
-      day = gps.date.day();
-      hour = gps.time.hour();
-      minute = gps.time.minute();
-      second = gps.time.second();
-      lcdSetSecondLine("DATE OK");
+    } else {
+      lcdSetSecondLine("NO LOCATION");
       delay(2000);
     }
 
-    if (ENABLE_LOG) {
-      Serial.println();
-      Serial.print("GPS Date: ");
-      Serial.print(year);
-      Serial.print("-");
-      Serial.print(month);
-      Serial.print("-");
-      Serial.println(day);
-      Serial.print("GPS Time (UTC): ");
-      Serial.print(hour);
-      Serial.print(":");
-      Serial.print(minute);
-      Serial.print(":");
-      Serial.println(second);
-      Serial.print("Observer Latitude: ");
-      Serial.println(observerLatitude, 6);
-      Serial.print("Observer Longitude: ");
-      Serial.println(observerLongitude, 6);
-      Serial.print("Observer Altitude (km): ");
-      Serial.println(observerAltitude, 3);
+    if (gps.date.isValid()) {
+      lcdSetSecondLine("DATE OK");
+      delay(2000);
+    } else {
+      lcdSetSecondLine("NO DATE");
+      delay(2000);
     }
     lcdClear();
   }
-  if (!gps.location.isValid()) {
-    Serial.print("Gps location: ");
-    Serial.println(gps.location.isValid() ? "Valid" : "Invalid");
 
+  if (!gps.location.isValid()) {
+    Serial.print("Gps location: INVALID");
     observerLatitude = -33.88336;
     observerLongitude = 152.20148;
     observerAltitude = 0.035;
   }
   if (!gps.date.isValid()) {
-    Serial.print("Gps date: ");
-    Serial.println(gps.date.isValid() ? "Valid" : "Invalid");
+    Serial.print("Gps date: INVALID");
     year = 2025;
     month = 9;
-    day = 17;  // Updated to current date
+    day = 17;
     hour = 12;
     minute = 0;
     second = 0;
@@ -940,6 +902,7 @@ void setup() {
     connectToWiFi();
     lastWiFiReconnectAttemptTime = millis();
     while (millis() - lastWiFiReconnectAttemptTime < 10000) {
+      i2cBusCheck();
       delay(1);
       if (WiFi.status() == WL_CONNECTED) {
         break;
@@ -948,11 +911,13 @@ void setup() {
     int wifiReconnectAttempts = 1;
 
     while (WiFi.status() != WL_CONNECTED) {
+      i2cBusCheck();
       wifiReconnectAttempts++;
       lcdSetSecondLine("ATTEMPT " + String(wifiReconnectAttempts));
       connectToWiFi();
       lastWiFiReconnectAttemptTime = millis();
       while (millis() - lastWiFiReconnectAttemptTime < 15000) {
+        i2cBusCheck();
         delay(1);
         if (WiFi.status() == WL_CONNECTED) {
           break;
@@ -967,35 +932,30 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
       lcdSetSecondLine("FETCH ISS TLE");
       while (!foundISSbyWifi && findISSbyWifiAttempts < 3) {
+        i2cBusCheck();
         findISSbyWifiAttempts++;
         makeTleApiRequest();
       }
-      delay(2000);
 
       lcdSetSecondLine("FETCH DECLINATION");
       while (!foundDeclinationByWifi && findDeclinationByWifiAttempts < 3) {
+        i2cBusCheck();
         findDeclinationByWifiAttempts++;
         makeDeclinationApiRequest();
       }
-      delay(2000);
     } else {
       lcdSetSecondLine("ERROR");
     }
-    WiFi.disconnect();
   }
   if (!foundISSbyWifi) {
     strcpy(tle_line1, "1 25544U 98067A   25259.15672217  .00010925  00000+0  19686-3 0  9993");
     strcpy(tle_line2, "2 25544  51.6329 216.1838 0004346 344.8645  15.2213 15.50326031529273");
+    lcdSetFirstLine("USING DEFAULT TLE");
   }
   parseISSTLE(tle_line1, tle_line2, satrec);
-  lcdClear();
-  lcdSetFirstLine("DATA PARSED");
+  lcdSetSecondLine("DATA PARSED");
   delay(2000);
   lcdClear();
-
-  // Elevation Motor Initialization
-  elevation.attach(ELEVATION_PIN);
-  elevation.write(currentElevation);
 
   // Magnometer Initialization
   lcdSetFirstLine("QMC5883L INIT");
@@ -1010,39 +970,72 @@ void setup() {
   lcdClear();
 }
 
+void updateGPSData() {
+  gpsTimeoutTimer = millis();
+  while (!gps.location.isValid() || !gps.date.isValid()) {
+    i2cBusCheck();
+    if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
+      break;
+    }
+    while (GPS_SERIAL.available()) {
+      i2cBusCheck();
+      char c = GPS_SERIAL.read();
+      if (ENABLE_LOG) {
+        Serial.write(c);
+      }
+      gps.encode(c);
+    }
+  }
+
+  if (gps.date.isValid()) {
+    year = gps.date.year();
+    month = gps.date.month();
+    day = gps.date.day();
+    hour = gps.time.hour();
+    minute = gps.time.minute();
+    second = gps.time.second();
+  }
+  if (gps.location.isValid()) {
+    observerAltitude = gps.altitude.kilometers();
+    observerLatitude = gps.location.lat();
+    observerLongitude = gps.location.lng();
+  }
+  if (gps.location.isValid() && gps.date.isValid()) {
+    isGpsFixed = true;
+  }
+  if (ENABLE_LOG) {
+    Serial.println();
+    Serial.print("GPS Date: ");
+    Serial.print(gps.date.year());
+    Serial.print("-");
+    Serial.print(gps.date.month());
+    Serial.print("-");
+    Serial.println(gps.date.day());
+    Serial.print("GPS Time (UTC): ");
+    Serial.print(gps.time.hour());
+    Serial.print(":");
+    Serial.print(gps.time.minute());
+    Serial.print(":");
+    Serial.println(gps.time.second());
+    Serial.print("GPS Latitude: ");
+    Serial.println(gps.location.lat(), 6);
+    Serial.print("GPS Longitude: ");
+    Serial.println(gps.location.lng(), 6);
+    Serial.print("GPS Altitude (km): ");
+    Serial.println(gps.altitude.kilometers(), 3);
+  }
+  lastGpsUpdateTime = millis();
+}
+
 void loop() {
+  i2cBusCheck();
   currentTime = millis();
 
-  // update the time and location every 30 seconds
+  // update GPS data every 30 seconds
   if (ENABLE_GPS) {
-    // reset timeout and try again to fetch gps data every 10 minute
-    if (currentTime - gpsTimeoutTimer >= 10 * 60 * 1000) {
-      gpsTimeoutTimer = currentTime;
-    }
-    // Update GPS data every 30 seconds
     if (currentTime - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) {
       lcdSetFirstLine("UPDATING GPS");
-      while (GPS_SERIAL.available()) {
-        // if it takes more than 1 minute to get a fix, give up
-        if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
-          break;
-        }
-        gps.encode(GPS_SERIAL.read());
-      }
-      lastGpsUpdateTime = currentTime;
-      if (gps.date.isValid()) {
-        year = gps.date.year();
-        month = gps.date.month();
-        day = gps.date.day();
-        hour = gps.time.hour();
-        minute = gps.time.minute();
-        second = gps.time.second();
-      }
-      if (gps.location.isValid()) {
-        observerAltitude = gps.altitude.kilometers();
-        observerLatitude = gps.location.lat();
-        observerLongitude = gps.location.lng();
-      }
+      updateGPSData();
     }
   }
 
@@ -1053,49 +1046,36 @@ void loop() {
       if (WiFi.status() != WL_CONNECTED) {
         connectToWiFi();
       }
-      makeTleApiRequest();
-      makeDeclinationApiRequest();
+      if (WiFi.status() == WL_CONNECTED) {
+        makeTleApiRequest();
+        makeDeclinationApiRequest();
+      }
     }
   }
 
   // Check for compass jumps indicating the tracker was moved
   if (checkForCompassJump()) {
     recalibrateAzimuth();
-    return;
-  }
-
-  if (ENABLE_LOG) {
-    Serial.println("=== DEBUG INFO ===");
-    Serial.print("Current time: ");
-    Serial.print(year); Serial.print("-");
-    Serial.print(month); Serial.print("-");
-    Serial.print(day); Serial.print(" ");
-    Serial.print(hour); Serial.print(":");
-    Serial.print(minute); Serial.print(":");
-    Serial.println(second);
-    Serial.print("Observer: ");
-    Serial.print(observerLatitude, 6); Serial.print(", ");
-    Serial.print(observerLongitude, 6); Serial.print(", ");
-    Serial.print(observerAltitude, 3); Serial.println(" km");
   }
 
   double jdnow;
   jday(year, month, day, hour, minute, second, jdnow);
-  
+
   if (ENABLE_LOG) {
+    Serial.println("==================");
     Serial.print("Julian day now: ");
     Serial.println(jdnow, 8);
     Serial.print("Satellite epoch JD: ");
     Serial.println(satrec.jdsatepoch, 8);
   }
-  
+
   double tsince = (jdnow - satrec.jdsatepoch) * 24.0 * 60.0;
-  
+
   if (ENABLE_LOG) {
     Serial.print("Time since epoch (minutes): ");
     Serial.println(tsince, 2);
   }
-  
+
   double ro[3], vo[3];
   sgp4(wgs72, satrec, tsince, ro, vo);
 
@@ -1110,8 +1090,10 @@ void loop() {
 
   if (ENABLE_LOG) {
     Serial.print("SGP4 position (km): ");
-    Serial.print(ro[0], 3); Serial.print(", ");
-    Serial.print(ro[1], 3); Serial.print(", ");
+    Serial.print(ro[0], 3);
+    Serial.print(", ");
+    Serial.print(ro[1], 3);
+    Serial.print(", ");
     Serial.println(ro[2], 3);
   }
 
@@ -1120,9 +1102,12 @@ void loop() {
 
   if (ENABLE_LOG) {
     Serial.print("Raw razel: ");
-    Serial.print(razel[0], 3); Serial.print(" km, ");
-    Serial.print(razel[1] * RAD_2_DEG, 3); Serial.print("° az, ");
-    Serial.print(razel[2] * RAD_2_DEG, 3); Serial.println("° el");
+    Serial.print(razel[0], 3);
+    Serial.print(" km, ");
+    Serial.print(razel[1] * RAD_2_DEG, 3);
+    Serial.print("° az, ");
+    Serial.print(razel[2] * RAD_2_DEG, 3);
+    Serial.println("° el");
   }
 
   double azimuth_deg = razel[1] * RAD_2_DEG;
