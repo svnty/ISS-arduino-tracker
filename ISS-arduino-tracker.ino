@@ -568,14 +568,12 @@ void connectToWiFi() {
     // Dummy HTTP request to wake up ESP32
     Serial.println("Sending dummy data to wake up ESP32");
     WiFiSSLClient client;
-    if (client.connect("google.com", 443)) {
-      client.println("GET / HTTP/1.1");
-      client.println("Host: google.com");
-      client.println("Connection: close");
-      client.println();
-      client.stop();
-      Serial.println("ESP32 wake-up request sent");
-    }
+    client.connect("google.com", 443);
+    client.println("GET / HTTP/1.1");
+    client.println("Host: google.com");
+    client.println("Connection: close");
+    client.println();
+    client.stop();
   }
 }
 
@@ -668,6 +666,12 @@ bool checkForCompassJump() {
   return false;
 }
 
+float normalize(float angle) {
+    angle = fmod(angle, 360.0);
+    if (angle < 0) angle += 360.0;
+    return angle;
+}
+
 void moveAzimuthTo(float targetAzimuth) {
   // Apply offset to target azimuth so movement is corrected
   float angleDifference = targetAzimuth - currentAzimuth;
@@ -697,8 +701,13 @@ void moveAzimuthTo(float targetAzimuth) {
       initialDifference += 360;
     }
 
-    // Determine direction and stick with it
-    bool moveCounterClockwise = (initialDifference > 0);
+    float a1 = normalize(targetAzimuth);
+    float a2 = normalize(initialHeading);
+
+    double ccw = fmod((a2 - a1 + 360.0), 360.0);
+    double cw  = fmod((a1 - a2 + 360.0), 360.0);
+
+    bool moveCounterClockwise = (cw > ccw);
 
     Serial.print("moveAzimuthTo - Initial heading: ");
     Serial.println(initialHeading);
