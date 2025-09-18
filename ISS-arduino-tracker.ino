@@ -684,22 +684,13 @@ void moveAzimuthTo(float targetAzimuth) {
     angleDifference += 360;
   }
 
-  if (fabs(angleDifference) >= 10.0F) {
+  if (fabs(angleDifference) >= 5.0F) {
     lcdClear();
     lcdSetFirstLine("FINDING ISS");
   }
 
   if (fabs(angleDifference) > 0.5) {
-    // Calculate direction ONCE at the beginning based on initial heading
     float initialHeading = getCompassHeading();
-    float initialDifference = targetAzimuth - initialHeading;
-
-    // Handle wraparound for initial heading difference
-    if (initialDifference > 180) {
-      initialDifference -= 360;
-    } else if (initialDifference < -180) {
-      initialDifference += 360;
-    }
 
     float a1 = normalize(targetAzimuth);
     float a2 = normalize(initialHeading);
@@ -709,22 +700,11 @@ void moveAzimuthTo(float targetAzimuth) {
 
     bool moveCounterClockwise = (cw > ccw);
 
-    Serial.print("moveAzimuthTo - Initial heading: ");
-    Serial.println(initialHeading);
-    Serial.print("moveAzimuthTo - Target azimuth: ");
-    Serial.println(targetAzimuth);
-    Serial.print("moveAzimuthTo - Initial difference: ");
-    Serial.println(initialDifference);
-    Serial.print("moveAzimuthTo - Direction chosen: ");
-    Serial.println(moveCounterClockwise ? "COUNTER-CLOCKWISE" : "CLOCKWISE");
-
     digitalWrite(AZIMUTH_DIR_PIN, moveCounterClockwise ? LOW : HIGH);
 
     while (true) {
       i2cBusCheck();
       currentHeading = getCompassHeading();
-
-      // Calculate current difference to target
       float headingDifference = targetAzimuth - currentHeading;
       // Handle wraparound for heading difference
       if (headingDifference > 180) {

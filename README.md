@@ -73,3 +73,8 @@ Inspired by
 # Troubleshooting
 
 Can't open the project? Open it in VS-Code and install the `svnty.vscode-arduino-intellisense` VS-Code extension.
+
+# Power usage
+
+Device uses real 3W (0.06A).
+
