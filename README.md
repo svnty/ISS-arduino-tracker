@@ -21,7 +21,7 @@ Print all files in stl_files folder, use Nylon for the bearing (Race Inner Botto
 | Ardino uno R4 WiFi | $50 |
 | Nema 17 stepper motor | $25 |
 | SG90 servo motor | $12 |
-| TMC2209 stepper motor driver | $ 15 |
+| TMC2209 stepper motor driver | $15 |
 | 230V AC -> 12V DC power supply | $40 |
 | 12V DC -> 9V DC voltage regulator | $10 |
 | QMC5883 magnometer | $5 |

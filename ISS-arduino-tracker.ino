@@ -547,14 +547,14 @@ void connectToWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startTime = millis();
-  
+
   while (WiFi.status() != WL_CONNECTED) {
     if (millis() - startTime >= 15 * 1000) {
       break;
     }
     delay(500);
   }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println();
     Serial.println("WiFi connected!");
@@ -667,9 +667,9 @@ bool checkForCompassJump() {
 }
 
 float normalize(float angle) {
-    angle = fmod(angle, 360.0);
-    if (angle < 0) angle += 360.0;
-    return angle;
+  angle = fmod(angle, 360.0);
+  if (angle < 0) angle += 360.0;
+  return angle;
 }
 
 void moveAzimuthTo(float targetAzimuth) {
@@ -696,7 +696,7 @@ void moveAzimuthTo(float targetAzimuth) {
     float a2 = normalize(initialHeading);
 
     double ccw = fmod((a2 - a1 + 360.0), 360.0);
-    double cw  = fmod((a1 - a2 + 360.0), 360.0);
+    double cw = fmod((a1 - a2 + 360.0), 360.0);
 
     bool moveCounterClockwise = (cw > ccw);
 
@@ -872,7 +872,7 @@ void setup() {
       lcdSetSecondLine("NO DATE");
       delay(2000);
     }
-    
+
     lcdClear();
   }
 
