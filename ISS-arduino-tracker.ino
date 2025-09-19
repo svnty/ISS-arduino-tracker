@@ -49,8 +49,7 @@ static const uint16_t PORT = 443;
 // i2c
 static const uint8_t MAX_i2c_DEVICES = 16;
 // compass
-// static const float COMPASS_AZIMUTH_OFFSET = -17; // degrees
-static const float COMPASS_AZIMUTH_OFFSET = 0.0;               // degrees
+static const float COMPASS_AZIMUTH_OFFSET = 17.0;               // degrees
 static const float COMPASS_JUMP_THRESHOLD = 5.0;               // degrees
 static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000;  // 5 seconds
 static const float CIRCLE_RADIUS = 20.0;                       // mm
@@ -94,6 +93,9 @@ static float currentElevation = 95.0;
 static float previousCompassHeading = 0.0;
 static unsigned long lastCompassCheckTime = 0;
 static unsigned long compassLastCalibrate = 0;
+static float compassOffsetX = 0.0, compassOffsetY = 0.0, compassOffsetZ = 0.0;
+static float compassScaleX = 1.0, compassScaleY = 1.0, compassScaleZ = 1.0;
+
 // i2c
 static uint8_t i2cDeviceAddresses[MAX_i2c_DEVICES];
 static uint8_t i2cDeviceCount = 0;
@@ -111,6 +113,50 @@ elsetrec satrec;
 Servo elevation;
 
 // -------- FUNCTIONS --------
+
+void calibrateCompass() {
+  int minX = 32767, maxX = -32768;
+  int minY = 32767, maxY = -32768;
+  int minZ = 32767, maxZ = -32768;
+  lcdSetFirstLine("CALIBRATING QMC5883L");
+  lcdSetSecondLine("Rotate sensor...");
+
+  Serial.println("Starting QMC5883L calibration. Please rotate the sensor in all directions for 10 seconds.");
+  unsigned long startTime = millis();
+  while (millis() - startTime < 10 * 60 * 1000) {
+    compass.read();
+
+    int x = compass.getX();
+    int y = compass.getY();
+    int z = compass.getZ();
+    minX = min(minX, x); maxX = max(maxX, x);
+    minY = min(minY, y); maxY = max(maxY, y);
+    minZ = min(minZ, z); maxZ = max(maxZ, z);
+
+    digitalWrite(AZIMUTH_STEP_PIN, HIGH);
+    delayMicroseconds(300);
+    digitalWrite(AZIMUTH_STEP_PIN, LOW);
+    delayMicroseconds(300);
+  }
+
+  compassOffsetX = (maxX + minX) / 2.0;
+  compassOffsetY = (maxY + minY) / 2.0;
+  compassOffsetZ = (maxZ + minZ) / 2.0;
+  compassScaleX = (maxX - minX) / 2.0;
+  compassScaleY = (maxY - minY) / 2.0;
+  compassScaleZ = (maxZ - minZ) / 2.0;
+
+  Serial.println("Compass calibration complete.");
+  Serial.print("Offset X: "); Serial.println(compassOffsetX);
+  Serial.print("Offset Y: "); Serial.println(compassOffsetY);
+  Serial.print("Offset Z: "); Serial.println(compassOffsetZ);
+  Serial.print("Scale X: "); Serial.println(compassScaleX);
+  Serial.print("Scale Y: "); Serial.println(compassScaleY);
+  Serial.print("Scale Z: "); Serial.println(compassScaleZ);
+  lcdSetSecondLine("Calibration done");
+  delay(2000);
+}
+
 void lcdClear() {
   lcd.setCursor(0, 0);
   lcd.print("                ");
@@ -615,26 +661,20 @@ void connectToWiFi() {
 
 float getCompassHeading() {
   compass.read();
-  // returns -180..180
-  float reading = compass.getAzimuth();
-
-  // normalize (-180, 180) to (0, 360)
-  if (reading < 0) reading += 360.0;
-
-  reading = reading + magneticDeclination + COMPASS_AZIMUTH_OFFSET;
-
-  // Re-normalize to 0..360
-  if (reading < 0.0) reading += 360.0;
-  if (reading >= 360.0) reading -= 360.0;
-
-  // adjust as sensor is upside-down
-  reading = 360.0 - reading;
-
-  // Re-normalize to 0..360
-  if (reading < 0.0) reading += 360.0;
-  if (reading >= 360.0) reading -= 360.0;
-
-  return reading;
+  // Get raw values
+  float x = (compass.getX() - compassOffsetX) / compassScaleX;
+  float y = (compass.getY() - compassOffsetY) / compassScaleY;
+  // Calculate heading from calibrated values
+  float heading = atan2(y, x) * 180.0 / PI;
+  if (heading < 0) heading += 360.0;
+  heading = heading + magneticDeclination + COMPASS_AZIMUTH_OFFSET;
+  if (heading < 0.0) heading += 360.0;
+  if (heading >= 360.0) heading -= 360.0;
+  // If sensor is upside-down, invert
+  heading = 360.0 - heading;
+  if (heading < 0.0) heading += 360.0;
+  if (heading >= 360.0) heading -= 360.0;
+  return heading;
 }
 
 float calculateAngleDifference(float angle1, float angle2) {
@@ -845,7 +885,7 @@ void testAzimuthCalculation(double issLat, double issLon) {
   // Manual calculation using great-circle formula
   double manualAzimuth = calculateAzimuth(observerLatitude, observerLongitude, issLat, issLon);
 
-  Serial.println("=== AZIMUTH COMPARISON TEST ===");
+  Serial.println("*** AZIMUTH COMPARISON TEST ***");
   Serial.print("Observer: ");
   Serial.print(observerLatitude, 6);
   Serial.print(", ");
@@ -857,7 +897,7 @@ void testAzimuthCalculation(double issLat, double issLon) {
   Serial.print("Manual azimuth calculation: ");
   Serial.print(manualAzimuth, 2);
   Serial.println("°");
-  Serial.println("==============================");
+  Serial.println("********************************");
 }
 
 void i2cBusCheck() {
@@ -1032,7 +1072,10 @@ void setup() {
   compass.init();
   delay(2000);
 
-  // Initial compass calibration
+  // Automatic compass calibration
+  calibrateCompass();
+
+  // Initial compass calibration for azimuth
   recalibrateAzimuth();
   previousCompassHeading = getCompassHeading();
   lastCompassCheckTime = millis();
@@ -1279,7 +1322,6 @@ void loop() {
   double razel[3], razelrates[3];
 
   if (ENABLE_LOG) {
-    Serial.println("=== RV2AZEL INPUT DEBUG ===");
     Serial.print("Observer lat (deg): ");
     Serial.println(observerLatitude, 6);
     Serial.print("Observer lon (deg): ");
@@ -1290,7 +1332,6 @@ void loop() {
     Serial.println(radians(observerLatitude), 6);
     Serial.print("Observer lon (rad): ");
     Serial.println(radians(observerLongitude), 6);
-    Serial.println("===========================");
   }
 
   rv2azel(ro, vo, radians(observerLatitude), radians(observerLongitude), observerAltitude, jdnow, razel, razelrates);
@@ -1371,7 +1412,6 @@ void loop() {
     Serial.print(azimuth_deg - currentCompass, 2);
     Serial.println("°)");
 
-    Serial.println("**********************");
     Serial.println("==================");
   }
 
