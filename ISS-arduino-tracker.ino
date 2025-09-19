@@ -52,9 +52,6 @@ static const uint8_t MAX_i2c_DEVICES = 16;
 static const float COMPASS_AZIMUTH_OFFSET = 17.0;               // degrees
 static const float COMPASS_JUMP_THRESHOLD = 5.0;               // degrees
 static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000;  // 5 seconds
-static const float CIRCLE_RADIUS = 20.0;                       // mm
-static const float POINTER_pivotX = -43.425;                   // pointer pivot x (mm), +x = east
-static const float POINTER_pivotY = 6.0;                       // pointer pivot y (mm), +y = north
 // lcd
 static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000;  // 5 seconds
 // wifi
@@ -119,9 +116,9 @@ void calibrateCompass() {
   int minY = 32767, maxY = -32768;
   int minZ = 32767, maxZ = -32768;
 
-  Serial.println("Starting QMC5883L calibration. Please rotate the sensor in all directions for 10 seconds.");
+  Serial.println("Starting QMC5883L calibration. Please rotate the sensor in all directions for 20 seconds.");
   unsigned long startTime = millis();
-  while (millis() - startTime < 10 * 1000) {
+  while (millis() - startTime < 20 * 1000) {
     compass.read();
 
     int x = compass.getX();
@@ -132,9 +129,9 @@ void calibrateCompass() {
     minZ = min(minZ, z); maxZ = max(maxZ, z);
 
     digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-    delayMicroseconds(500);
+    delayMicroseconds(1000);
     digitalWrite(AZIMUTH_STEP_PIN, LOW);
-    delayMicroseconds(500);
+    delayMicroseconds(1000);
   }
 
   compassOffsetX = (maxX + minX) / 2.0;
@@ -1123,7 +1120,6 @@ void updateLocalTime() {
 void updateGPSData() {
   Serial.println("Updating GPS data...");
   gpsTimeoutTimer = millis();
-  static unsigned long lastDisplayUpdate = 0;
 
   while (
     (!gps.location.isValid() && !gps.date.isValid()) || 
@@ -1158,21 +1154,31 @@ void updateGPSData() {
 
   // Update our variables with the current GPS data (fresh or existing)
   if (gps.date.isValid()) {
-    year = gps.date.year();
-    month = gps.date.month();
-    day = gps.date.day();
-    hour = gps.time.hour();
-    minute = gps.time.minute();
-    second = gps.time.second();
-    // Reset local time tracking since we have GPS time
-    lastTimeUpdateMillis = millis();
-    gpsDateAge = gps.date.age();
-    gpsLocationAge = gps.location.age();
+    // Compose GPS time as seconds since midnight
+    int gpsTotalSeconds = gps.time.hour() * 3600 + gps.time.minute() * 60 + gps.time.second();
+    int localTotalSeconds = hour * 3600 + minute * 60 + second;
+    // Only update if GPS time is ahead of local time, or if local time is out of bounds
+    if (gpsTotalSeconds >= localTotalSeconds || localTotalSeconds < 0 || localTotalSeconds >= 86400) {
+      year = gps.date.year();
+      month = gps.date.month();
+      day = gps.date.day();
+      hour = gps.time.hour();
+      minute = gps.time.minute();
+      second = gps.time.second();
+      // Reset local time tracking since we have GPS time
+      lastTimeUpdateMillis = millis();
+      gpsDateAge = gps.date.age();
+      gpsLocationAge = gps.location.age();
 
-    if (ENABLE_LOG) {
-      Serial.println("GPS time data age: ");
-      Serial.print(gps.time.age());
-      Serial.println(" ms");
+      if (ENABLE_LOG) {
+        Serial.println("GPS time data age: ");
+        Serial.print(gps.time.age());
+        Serial.println(" ms");
+      }
+    } else {
+      if (ENABLE_LOG) {
+        Serial.println("GPS time is older than local time, not updating.");
+      }
     }
   }
 

@@ -18,21 +18,21 @@ Print all files in stl_files folder, use Nylon for the bearing (Race Inner Botto
 
 | Part | Cost (AUD) |
 |--|--|
-| Ardino uno R4 WiFi | $50 |
-| Nema 17 stepper motor | $25 |
-| SG90 servo motor | $12 |
-| TMC2209 stepper motor driver | $15 |
-| 230V AC -> 12V DC power supply | $40 |
-| 12V DC -> 9V DC voltage regulator | $10 |
-| QMC5883 magnometer | $5 |
-| 12 wire 5A slip ring 22mm | $30 |
+| [Ardino uno R4 WiFi](https://www.jaycar.com.au/arduino-uno-wifi-r4-development-board/p/XC9211) | $50 |
+| [Nema 17 stepper motor](https://www.jaycar.com.au/nema17-stepper-motor/p/YM2756) | $25 |
+| [SG90 servo motor](https://www.jaycar.com.au/arduino-compatible-9g-micro-servo-motor/p/YM2758) | $12 |
+| [TMC2209 stepper motor](https://www.ebay.com.au/sch/i.html?_nkw=TMC2209) | $15 |
+| [230V AC -> 12V DC power supply](https://www.jaycar.com.au/mean-well-35w-12v-3a-power-supply/p/MP3285) | $40 |
+| [12V DC -> 9V DC voltage regulator](https://core-electronics.com.au/20w-adjustable-dc-dc-buck-converter-with-digital-display.html) | $10 |
+| [GY-271 QMC5883 magnometer](https://www.ebay.com.au/sch/i.html?_nkw=QMC5883+GY-271) | $5 |
+| [12 wire 5A slip ring 22mm](https://www.ebay.com.au/sch/i.html?_nkw=22mm+12+wire+5A+slip+ring) | $30 |
 | 15 AWG wire | $5 |
 | 20 AWG wire | $15 |
 | Dupont jumper wires | $20 |
-| 16x2 LCD + I2C Backpack | $10 |
+| 16x2 LCD + i2c Backpack | $10 |
 | 1kg Nylon filament | $60 |
 | 1kg PLA filament | $20 |
-| ATGM336H GPS | $20 |
+| [ATGM336H GPS](https://www.ebay.com.au/sch/i.html?_nkw=BDS+GPS+ATGM336H) | $20 |
 | Solder breadboard | $15 |
 | 3 pin rocker power switch | $10 |
 | M3 nuts + screws | $10 |
