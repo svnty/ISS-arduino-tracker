@@ -118,12 +118,10 @@ void calibrateCompass() {
   int minX = 32767, maxX = -32768;
   int minY = 32767, maxY = -32768;
   int minZ = 32767, maxZ = -32768;
-  lcdSetFirstLine("CALIBRATING QMC5883L");
-  lcdSetSecondLine("Rotate sensor...");
 
   Serial.println("Starting QMC5883L calibration. Please rotate the sensor in all directions for 10 seconds.");
   unsigned long startTime = millis();
-  while (millis() - startTime < 10 * 60 * 1000) {
+  while (millis() - startTime < 10 * 1000) {
     compass.read();
 
     int x = compass.getX();
@@ -134,9 +132,9 @@ void calibrateCompass() {
     minZ = min(minZ, z); maxZ = max(maxZ, z);
 
     digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-    delayMicroseconds(300);
+    delayMicroseconds(500);
     digitalWrite(AZIMUTH_STEP_PIN, LOW);
-    delayMicroseconds(300);
+    delayMicroseconds(500);
   }
 
   compassOffsetX = (maxX + minX) / 2.0;
@@ -153,8 +151,7 @@ void calibrateCompass() {
   Serial.print("Scale X: "); Serial.println(compassScaleX);
   Serial.print("Scale Y: "); Serial.println(compassScaleY);
   Serial.print("Scale Z: "); Serial.println(compassScaleZ);
-  lcdSetSecondLine("Calibration done");
-  delay(2000);
+  lcdSetSecondLine("OK");
 }
 
 void lcdClear() {
@@ -832,9 +829,9 @@ void moveAzimuthTo(float targetAzimuth) {
       }
 
       digitalWrite(AZIMUTH_STEP_PIN, HIGH);
-      delayMicroseconds(fabs(headingDifference) > 20.0F ? 200 : 1000);  // fast stepping if far away
+      delayMicroseconds(fabs(headingDifference) > 20.0F ? 500 : 1000);  // fast stepping if far away
       digitalWrite(AZIMUTH_STEP_PIN, LOW);
-      delayMicroseconds(fabs(headingDifference) > 20.0F ? 200 : 1000);  // fast stepping if far away
+      delayMicroseconds(fabs(headingDifference) > 20.0F ? 500 : 1000);  // fast stepping if far away
     }
 
     float finalHeading = getCompassHeading();
@@ -1070,10 +1067,8 @@ void setup() {
   // Magnometer Initialization
   lcdSetFirstLine("QMC5883L INIT");
   compass.init();
-  delay(2000);
-
-  // Automatic compass calibration
   calibrateCompass();
+  delay(2000);
 
   // Initial compass calibration for azimuth
   recalibrateAzimuth();
@@ -1128,6 +1123,7 @@ void updateLocalTime() {
 void updateGPSData() {
   Serial.println("Updating GPS data...");
   gpsTimeoutTimer = millis();
+  static unsigned long lastDisplayUpdate = 0;
 
   while (
     (!gps.location.isValid() && !gps.date.isValid()) || 
@@ -1146,7 +1142,6 @@ void updateGPSData() {
       }
       gps.encode(c);
     }
-    lcdSetSecondLine("Satellites: " + String(gps.satellites.value()));
   }
 
   if (
