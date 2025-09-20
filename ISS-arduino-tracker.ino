@@ -64,6 +64,7 @@ static const unsigned long GPS_TIMEOUT_INTERVAL = 60 * 1000;      // 1 minute
 // -------- VARIABLES --------
 // timers
 static unsigned long lastLcdUpdateTime = 0;
+static unsigned long lastLcdResetTime = 0;
 static unsigned long lastGpsUpdateTime = 0;
 static unsigned long lastWiFiUpdateTime = 0;
 static unsigned long lastWiFiReconnectAttemptTime = 0;
@@ -92,7 +93,6 @@ static unsigned long lastCompassCheckTime = 0;
 static unsigned long compassLastCalibrate = 0;
 static float compassOffsetX = 0.0, compassOffsetY = 0.0, compassOffsetZ = 0.0;
 static float compassScaleX = 1.0, compassScaleY = 1.0, compassScaleZ = 1.0;
-
 // i2c
 static uint8_t i2cDeviceAddresses[MAX_i2c_DEVICES];
 static uint8_t i2cDeviceCount = 0;
@@ -173,7 +173,13 @@ void lcdSetSecondLine(String secondLineText) {
 }
 
 void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
+  // reset the LCD every 2 minutes to prevent it from printing garbage
+  if (millis() - lastLcdResetTime >= 2 * 60 * 1000) {
+    lcd.begin(16, 2);
+    lastLcdResetTime = millis();
+  }
   lcdClear();
+
   // If ISS is overhead (elevation > 10°), always show ISS position
   bool issOverhead = elevation_deg > 10.0;
 
@@ -1066,6 +1072,7 @@ void setup() {
   compass.init();
   calibrateCompass();
   delay(2000);
+  lcdClear();
 
   // Initial compass calibration for azimuth
   recalibrateAzimuth();
@@ -1222,7 +1229,7 @@ void updateGPSData() {
 void loop() {
   i2cBusCheck();
   updateLocalTime();
-
+  
   // update GPS data every hour
   if (ENABLE_GPS) {
     if (millis() - lastGpsUpdateTime >= GPS_UPDATE_INTERVAL) {
@@ -1236,7 +1243,7 @@ void loop() {
   if (ENABLE_WIFI) {
     if (millis() - lastWiFiUpdateTime >= WIFI_UPDATE_INTERVAL) {
       lcdClear();
-      lcdSetFirstLine("FETCHING DATA");
+      lcdSetFirstLine("UPDATING DATA");
       if (WiFi.status() != WL_CONNECTED) {
         connectToWiFi();
       }

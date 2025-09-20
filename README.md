@@ -21,7 +21,7 @@ Print all files in stl_files folder, use Nylon for the bearing (Race Inner Botto
 | [Ardino uno R4 WiFi](https://www.jaycar.com.au/arduino-uno-wifi-r4-development-board/p/XC9211) | $50 |
 | [Nema 17 stepper motor](https://www.jaycar.com.au/nema17-stepper-motor/p/YM2756) | $25 |
 | [SG90 servo motor](https://www.jaycar.com.au/arduino-compatible-9g-micro-servo-motor/p/YM2758) | $12 |
-| [TMC2209 stepper motor](https://www.ebay.com.au/sch/i.html?_nkw=TMC2209) | $15 |
+| [TMC2209 stepper motor driver](https://www.ebay.com.au/sch/i.html?_nkw=TMC2209) | $15 |
 | [230V AC -> 12V DC power supply](https://www.jaycar.com.au/mean-well-35w-12v-3a-power-supply/p/MP3285) | $40 |
 | [12V DC -> 9V DC voltage regulator](https://core-electronics.com.au/20w-adjustable-dc-dc-buck-converter-with-digital-display.html) | $10 |
 | [GY-271 QMC5883 magnometer](https://www.ebay.com.au/sch/i.html?_nkw=QMC5883+GY-271) | $5 |
@@ -78,3 +78,6 @@ Can't open the project? Open it in VS-Code and install the `svnty.vscode-arduino
 
 Device uses real 3W (0.06A).
 
+# TODO
+
+- Add 3S LiPo support?
