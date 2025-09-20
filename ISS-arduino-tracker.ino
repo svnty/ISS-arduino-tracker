@@ -943,6 +943,7 @@ void i2cBusRecover() {
 
   // Reinitialize I2C master
   Wire.begin();
+  Wire.setClock(10000);
   Serial.println("I2C bus recovered!");
 }
 
@@ -951,6 +952,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Initializing Serial...");
   Wire.begin();
+  Wire.setClock(10000);
   i2cBusRecover();
 
   for (uint8_t address = 1; address < 127; address++) {
