@@ -110,7 +110,6 @@ elsetrec satrec;
 Servo elevation;
 
 // -------- FUNCTIONS --------
-
 void calibrateCompass() {
   int minX = 32767, maxX = -32768;
   int minY = 32767, maxY = -32768;
@@ -637,7 +636,6 @@ void connectToWiFi() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    lastWiFiUpdateTime = millis();
     Serial.println();
     Serial.println("WiFi connected!");
     Serial.print("IP address: ");
@@ -1062,6 +1060,9 @@ void setup() {
     strcpy(tle_line2, "2 25544  51.6329 216.1838 0004346 344.8645  15.2213 15.50326031529273");
     lcdSetFirstLine("USING DEFAULT TLE");
   }
+  if (foundDeclinationByWifi && foundISSbyWifi) {
+    lastWiFiUpdateTime = millis();
+  }
   parseISSTLE(tle_line1, tle_line2, satrec);
   lcdSetSecondLine("DATA PARSED");
   delay(2000);
@@ -1251,6 +1252,7 @@ void loop() {
         makeTleApiRequest();
         makeDeclinationApiRequest();
       }
+      lastWiFiUpdateTime = millis();
     }
   }
 
@@ -1432,3 +1434,4 @@ void loop() {
     lastLcdUpdateTime = millis();
   }
 }
+
