@@ -76,7 +76,7 @@ Can't open the project? Open it in VS-Code and install the `svnty.vscode-arduino
 
 # Power usage
 
-Device uses real 3W (0.06A).
+Device uses 12W (aprox 0.23A).
 
 # TODO
 

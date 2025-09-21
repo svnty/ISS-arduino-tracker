@@ -183,7 +183,7 @@ void updateLCD(double azimuth_deg, double elevation_deg, double range_km) {
   bool issOverhead = elevation_deg > 10.0;
 
   if (issOverhead) {
-    lcdSetFirstLine("ISS OVERHEAD!");
+    lcdSetFirstLine("ISS VISIBLE!");
     char buffer[17];
     snprintf(buffer, sizeof(buffer), "Az:%03.0f El:%02.0f", azimuth_deg, elevation_deg);
     lcdSetSecondLine(buffer);
