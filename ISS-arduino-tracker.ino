@@ -514,6 +514,136 @@ void parseDeclinationJsonResponse(String jsonString) {
   }
 }
 
+bool fetchUtcTimeFromWifi() {
+  lcdClear();
+  lcdSetFirstLine("GPS BYPASS");
+  lcdSetSecondLine("FETCHING TIME...");
+  Serial.println("Fetching UTC time via timeapi.io...");
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected, attempting to connect...");
+    connectToWiFi();
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Cannot fetch time: no WiFi");
+    lcdSetSecondLine("WIFI ERROR");
+    return false;
+  }
+
+  const char *TIME_HOST = "timeapi.io";
+  const uint16_t TIME_PORT = 443;
+  const char *TIME_PATH = "/api/v1/time/current/utc";
+
+  WiFiSSLClient client;
+  Serial.print("Connecting to "); Serial.print(TIME_HOST); Serial.print(":"); Serial.println(TIME_PORT);
+  if (!client.connect(TIME_HOST, TIME_PORT)) {
+    Serial.println("Time API connection failed");
+    lcdSetSecondLine("API ERROR");
+    return false;
+  }
+
+  String request = "GET " + String(TIME_PATH) + " HTTP/1.1\r\n";
+  request += "Host: " + String(TIME_HOST) + "\r\n";
+  request += "User-Agent: ArduinoUnoR4Wifi/1.0\r\n";
+  request += "Accept: application/json\r\n";
+  request += "Connection: close\r\n\r\n";
+
+  Serial.println("Time API request:");
+  Serial.println(request);
+  client.print(request);
+
+  String response = "";
+  unsigned long start = millis();
+  const unsigned long timeoutLimit = 10000;
+
+  while ((client.connected() || client.available()) && (millis() - start < timeoutLimit)) {
+    if (client.available()) {
+      response += (char)client.read();
+      start = millis();
+    }
+    delay(1);
+  }
+
+  client.stop();
+
+  if (response.length() == 0) {
+    Serial.println("Time API returned empty raw response");
+    lcdSetSecondLine("INVALID RESPONSE");
+    return false;
+  }
+
+  Serial.print("Time API raw response length: ");
+  Serial.println(response.length());
+
+  int statusLineEnd = response.indexOf('\n');
+  String statusLine = "";
+  if (statusLineEnd > 0) {
+    statusLine = response.substring(0, statusLineEnd);
+    Serial.print("Time API status line: ");
+    Serial.println(statusLine);
+  }
+
+  if (statusLine.indexOf("200") == -1) {
+    lcdSetSecondLine("HTTP ERROR");
+    return false;
+  }
+
+  int bodyStart = response.indexOf("\r\n\r\n");
+  Serial.print("Time API body start index: ");
+  Serial.println(bodyStart);
+
+  String body = (bodyStart >= 0) ? response.substring(bodyStart + 4) : response;
+
+  String preview = body;
+  if (preview.length() > 400) {
+    preview = preview.substring(0, 400);
+  }
+
+  Serial.println("Time API raw preview:");
+  Serial.println(preview);
+
+  // Handles both plain JSON and chunked body framing by extracting between { and }
+  String cleaned = cleanDeclinationChunkedJSON(body);
+
+  DynamicJsonDocument doc(512);
+  DeserializationError err = deserializeJson(doc, cleaned);
+  if (err) {
+    Serial.print("Time JSON parse failed: ");
+    Serial.println(err.c_str());
+    lcdSetSecondLine("TIME PARSE ERR");
+    return false;
+  }
+
+  if (doc["utc_time"].isNull()) {
+    Serial.println("Time API missing utc_time");
+    lcdSetSecondLine("TIME FIELD ERR");
+    return false;
+  }
+
+  String dt = doc["utc_time"].as<String>();
+  if (dt.length() < 19) {
+    Serial.println("Time API utc_time too short");
+    lcdSetSecondLine("TIME FORMAT ERR");
+    return false;
+  }
+
+  year = dt.substring(0, 4).toInt();
+  month = dt.substring(5, 7).toInt();
+  day = dt.substring(8, 10).toInt();
+  hour = dt.substring(11, 13).toInt();
+  minute = dt.substring(14, 16).toInt();
+  second = dt.substring(17, 19).toInt();
+  lastTimeUpdateMillis = millis();
+
+  Serial.print("UTC time set from API: ");
+  Serial.print(year); Serial.print("-"); Serial.print(month); Serial.print("-"); Serial.print(day);
+  Serial.print(" "); Serial.print(hour); Serial.print(":"); Serial.print(minute); Serial.print(":"); Serial.println(second);
+
+  lcdSetSecondLine("TIME OK");
+  return true;
+}
+
 void parseISSTLE(const char *line1, const char *line2, elsetrec &satrec) {
   Serial.println("=== TLE PARSING DEBUG ===");
   Serial.print("Input Line 1: ");
@@ -620,6 +750,8 @@ void parseISSTLE(const char *line1, const char *line2, elsetrec &satrec) {
 }
 
 void connectToWiFi() {
+  lcdClear();
+  lcdSetFirstLine("WIFI INIT");
   Serial.print("Connecting to WiFi network: ");
   Serial.println(WIFI_SSID);
   WiFi.disconnect();
@@ -997,7 +1129,7 @@ void setup() {
       delay(2000);
     }
 
-    if (gps.date.isValid()) {
+    if (gps.date.isValid() && gps.date.year() > 2024) {
       lcdSetSecondLine("DATE OK");
       delay(2000);
     } else {
@@ -1010,23 +1142,42 @@ void setup() {
 
   if (!gps.location.isValid()) {
     Serial.println("Gps location: INVALID");
+    // Default to Haymarket, Australia if GPS data is not available
     observerLatitude = -33.88336;
     observerLongitude = 152.20148;
     observerAltitude = 0.035;
   }
-  if (!gps.date.isValid()) {
+  if (!gps.date.isValid() || gps.date.year() < 2024) {
     Serial.println("Gps date: INVALID");
-    year = 2025;
-    month = 9;
-    day = 18;
-    hour = 12;
-    minute = 0;
-    second = 0;
+    bool timeSet = false;
+    // Try getting UTC time over WiFi if available
+    if (ENABLE_WIFI) {
+      int attempts = 0;
+      while (attempts < 3 && !timeSet) {
+        attempts++;
+        if (fetchUtcTimeFromWifi()) {
+          timeSet = true;
+          break;
+        }
+        delay(500);
+      }
+    }
+    // Fallback to hardcoded guess if time fetch failed
+    if (!timeSet) {
+      lcdClear();
+      lcdSetFirstLine("TIME FAIL");
+      lcdSetSecondLine("GUESSING DATE");
+      year = 2026;
+      month = 5;
+      day = 4;
+      hour = 12;
+      minute = 0;
+      second = 0;
+    }
   }
 
   // WiFi Initialization
   if (ENABLE_WIFI) {
-    lcdSetFirstLine("WIFI INIT");
     connectToWiFi();
 
     int wifiReconnectAttempts = 1;
@@ -1058,8 +1209,8 @@ void setup() {
     }
   }
   if (!foundISSbyWifi) {
-    strcpy(tle_line1, "1 25544U 98067A   25259.15672217  .00010925  00000+0  19686-3 0  9993");
-    strcpy(tle_line2, "2 25544  51.6329 216.1838 0004346 344.8645  15.2213 15.50326031529273");
+    strcpy(tle_line1, "1 25544U 98067A   26122.84497350  .00006801  00000+0  13115-3 0  9991");
+    strcpy(tle_line2, "2 25544  51.6308 164.5377 0007264  16.4817 343.6406 15.49068051564723");
     lcdSetFirstLine("USING DEFAULT TLE");
   }
   if (foundDeclinationByWifi && foundISSbyWifi) {
@@ -1130,15 +1281,28 @@ void updateLocalTime() {
 void updateGPSData() {
   Serial.println("Updating GPS data...");
   gpsTimeoutTimer = millis();
+  uint8_t lastCountdownSec = 255;
 
   while (
     (!gps.location.isValid() && !gps.date.isValid()) || 
     ((gps.date.age() > GPS_UPDATE_INTERVAL) || (gps.location.age() > GPS_UPDATE_INTERVAL))
   ) {
+    unsigned long elapsed = millis() - gpsTimeoutTimer;
+    unsigned long remainingMs = (elapsed >= GPS_TIMEOUT_INTERVAL) ? 0 : (GPS_TIMEOUT_INTERVAL - elapsed);
+    uint8_t remainingSec = (uint8_t)((remainingMs + 999) / 1000);
+
+    if (remainingSec != lastCountdownSec) {
+      char countdown[17];
+      snprintf(countdown, sizeof(countdown), "SEARCHING.. %lus", remainingSec);
+      lcdSetSecondLine(countdown);
+      lastCountdownSec = remainingSec;
+    }
+
     if (millis() - gpsTimeoutTimer >= GPS_TIMEOUT_INTERVAL) {
       if (ENABLE_LOG) {
         Serial.println("GPS timeout waiting for initial fix");
       }
+      lcdSetSecondLine("GPS TIMEOUT");
       break;
     }
     while (GPS_SERIAL.available()) {
@@ -1165,29 +1329,48 @@ void updateGPSData() {
   // Update our variables with the current GPS data (fresh or existing)
   if (gps.date.isValid()) {
     // Compose GPS time as seconds since midnight
-    int gpsTotalSeconds = gps.time.hour() * 3600 + gps.time.minute() * 60 + gps.time.second();
-    int localTotalSeconds = hour * 3600 + minute * 60 + second;
-    // Only update if GPS time is ahead of local time, or if local time is out of bounds
-    if (gpsTotalSeconds >= localTotalSeconds || localTotalSeconds < 0 || localTotalSeconds >= 86400) {
-      year = gps.date.year();
-      month = gps.date.month();
-      day = gps.date.day();
-      hour = gps.time.hour();
-      minute = gps.time.minute();
-      second = gps.time.second();
-      // Reset local time tracking since we have GPS time
-      lastTimeUpdateMillis = millis();
-      gpsDateAge = gps.date.age();
-      gpsLocationAge = gps.location.age();
+    if (gps.date.year() > 2024) {
+      // If GPS date is valid and reasonable, use it to update local time
+      int gpsTotalSeconds = gps.time.hour() * 3600 + gps.time.minute() * 60 + gps.time.second();
+      int localTotalSeconds = hour * 3600 + minute * 60 + second;
+      // Only update if GPS time is ahead of local time, or if local time is out of bounds
+      if (gpsTotalSeconds >= localTotalSeconds || localTotalSeconds < 0 || localTotalSeconds >= 86400) {
+        year = gps.date.year();
+        month = gps.date.month();
+        day = gps.date.day();
+        hour = gps.time.hour();
+        minute = gps.time.minute();
+        second = gps.time.second();
+        // Reset local time tracking since we have GPS time
+        lastTimeUpdateMillis = millis();
+        gpsDateAge = gps.date.age();
+        gpsLocationAge = gps.location.age();
 
-      if (ENABLE_LOG) {
-        Serial.println("GPS time data age: ");
-        Serial.print(gps.time.age());
-        Serial.println(" ms");
-      }
+        if (ENABLE_LOG) {
+          Serial.println("GPS time data age: ");
+          Serial.print(gps.time.age());
+          Serial.println(" ms");
+        }
+    }
     } else {
       if (ENABLE_LOG) {
         Serial.println("GPS time is older than local time, not updating.");
+      }
+    }
+  }
+
+  // If GPS date is not valid, try fetching UTC time over WiFi as a fallback
+  if (!gps.date.isValid() || gps.date.year() < 2024) {
+    if (ENABLE_WIFI) {
+      if (WiFi.status() != WL_CONNECTED) {
+        connectToWiFi();
+      }
+      if (WiFi.status() == WL_CONNECTED) {
+        int attempts = 0;
+        while (attempts < 3 && !fetchUtcTimeFromWifi()) {
+          attempts++;
+          delay(500);
+        }
       }
     }
   }

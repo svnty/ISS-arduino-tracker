@@ -1,0 +1,66 @@
+{
+  "tasks": [
+    {
+      "label": "Arduino: Verify (Compile)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "-b",
+        "arduino:renesas_uno:unor4wifi",
+        "--build-path",
+        "${workspaceFolder}/build",
+        "${workspaceFolder}/ISS-arduino-tracker.ino"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "detail": "Compile sketch using Arduino CLI"
+    },
+    {
+      "label": "Arduino: Upload",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "upload",
+        "-b",
+        "arduino:renesas_uno:unor4wifi",
+        "-p",
+        "/dev/tty.usbmodemB43A45B4DCB42",
+        "--build-path",
+        "${workspaceFolder}/build",
+        "${workspaceFolder}/ISS-arduino-tracker.ino"
+      ],
+      "group": {
+        "kind": "build"
+      },
+      "detail": "Upload sketch to board"
+    },
+    {
+      "label": "Arduino: Debug",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "-b",
+        "arduino:renesas_uno:unor4wifi",
+        "--build-path",
+        "${workspaceFolder}/build",
+        "-v",
+        "${workspaceFolder}/ISS-arduino-tracker.ino"
+      ],
+      "group": {
+        "kind": "build"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "detail": "Debug build (verbose compile)"
+    }
+  ],
+  "version": "2.0.0"
+}
