@@ -55,7 +55,7 @@ static const unsigned long COMPASS_CHECK_INTERVAL = 5 * 1000;  // 5 seconds
 // lcd
 static const unsigned long LCD_UPDATE_INTERVAL = 5 * 1000;  // 5 seconds
 // wifi
-static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000;  // 1 hour
+static const unsigned long WIFI_UPDATE_INTERVAL = 60 * 60 * 1000 + 60 * 30 * 1000;  // 1 hour + 30 minutes
 static const unsigned long WIFI_TIMEOUT_TIME = 60 * 1000;          // 1 minute
 // gps
 static const unsigned long GPS_UPDATE_INTERVAL = 10 * 60 * 1000;  // 10 minutes
@@ -281,7 +281,7 @@ void makeTleApiRequest() {
 
   Serial.println("Connected to server");
 
-  String request = "GET " + String("/NORAD/elements/gp.php?GROUP=stations") + " HTTP/1.1\r\n";
+  String request = "GET " + String("/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle") + " HTTP/1.1\r\n";
   request += "Host: " + String(TLE_API_HOST) + "\r\n";
   request += "User-Agent: ArduinoUnoR4Wifi/1.0\r\n";
   request += "Cache-Control: no-cache\r\n";
@@ -343,8 +343,6 @@ void makeTleApiRequest() {
 void parseTLEData(String data, int issIndex) {
   Serial.println("Parsing TLE data...");
 
-  Serial.println("Found ISS (ZARYA) data!");
-
   // Find the first TLE line (starts with "1 25544")
   int line1Index = data.indexOf("1 25544", issIndex);
   if (line1Index == -1) {
@@ -358,6 +356,8 @@ void parseTLEData(String data, int issIndex) {
     Serial.println("TLE Line 2 not found!");
     return;
   }
+
+  Serial.println("Found ISS (ZARYA) data!");
 
   // Extract Line 1 (69 characters for standard TLE format)
   String line1 = data.substring(line1Index, line1Index + 69);
@@ -1429,7 +1429,7 @@ void loop() {
   if (ENABLE_WIFI) {
     if (millis() - lastWiFiUpdateTime >= WIFI_UPDATE_INTERVAL) {
       lcdClear();
-      lcdSetFirstLine("UPDATING DATA");
+      lcdSetFirstLine("UPDATING TLE");
       if (WiFi.status() != WL_CONNECTED) {
         connectToWiFi();
       }
