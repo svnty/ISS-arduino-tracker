@@ -330,6 +330,7 @@ void makeTleApiRequest() {
     foundISSbyWifi = true;
     Serial.println(httpResponse);
     parseTLEData(httpResponse, issIndex);
+    lcdSetSecondLine("OK");
   } else {
     foundISSbyWifi = false;
   }
@@ -641,6 +642,7 @@ bool fetchUtcTimeFromWifi() {
   Serial.print(" "); Serial.print(hour); Serial.print(":"); Serial.print(minute); Serial.print(":"); Serial.println(second);
 
   lcdSetSecondLine("TIME OK");
+  delay(1000);
   return true;
 }
 
@@ -1112,7 +1114,52 @@ void setup() {
   lcd.init();
   lcd.backlight();
   lcdSetFirstLine("ARDUINO INIT");
+  delay(1500);
+
+  // WiFi Initialization
+  if (ENABLE_WIFI) {
+    connectToWiFi();
+
+    int wifiReconnectAttempts = 1;
+
+    while (WiFi.status() != WL_CONNECTED) {
+      wifiReconnectAttempts++;
+      lcdSetSecondLine("ATTEMPT " + String(wifiReconnectAttempts));
+      connectToWiFi();
+      if (wifiReconnectAttempts >= 3) {
+        lcdSetSecondLine("ERROR");
+        break;
+      }
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      lcdSetSecondLine("FETCH ISS TLE");
+      while (!foundISSbyWifi && findISSbyWifiAttempts < 3) {
+        findISSbyWifiAttempts++;
+        makeTleApiRequest();
+      }
+
+      lcdSetSecondLine("FETCH DECLINATION");
+      while (!foundDeclinationByWifi && findDeclinationByWifiAttempts < 3) {
+        findDeclinationByWifiAttempts++;
+        makeDeclinationApiRequest();
+      }
+    } else {
+      lcdSetSecondLine("ERROR");
+    }
+  }
+  if (!foundISSbyWifi) {
+    strcpy(tle_line1, "1 25544U 98067A   26122.84497350  .00006801  00000+0  13115-3 0  9991");
+    strcpy(tle_line2, "2 25544  51.6308 164.5377 0007264  16.4817 343.6406 15.49068051564723");
+    lcdSetFirstLine("USING DEFAULT TLE");
+  }
+  if (foundDeclinationByWifi && foundISSbyWifi) {
+    lastWiFiUpdateTime = millis();
+  }
+  parseISSTLE(tle_line1, tle_line2, satrec);
+  lcdSetSecondLine("DATA PARSED OK");
   delay(1000);
+  lcdClear();
 
   // GPS Initialization
   if (ENABLE_GPS) {
@@ -1162,9 +1209,9 @@ void setup() {
         delay(500);
       }
     }
+    lcdClear();
     // Fallback to hardcoded guess if time fetch failed
     if (!timeSet) {
-      lcdClear();
       lcdSetFirstLine("TIME FAIL");
       lcdSetSecondLine("GUESSING DATE");
       year = 2026;
@@ -1173,53 +1220,9 @@ void setup() {
       hour = 12;
       minute = 0;
       second = 0;
+      delay(500);
     }
   }
-
-  // WiFi Initialization
-  if (ENABLE_WIFI) {
-    connectToWiFi();
-
-    int wifiReconnectAttempts = 1;
-
-    while (WiFi.status() != WL_CONNECTED) {
-      wifiReconnectAttempts++;
-      lcdSetSecondLine("ATTEMPT " + String(wifiReconnectAttempts));
-      connectToWiFi();
-      if (wifiReconnectAttempts >= 3) {
-        lcdSetSecondLine("ERROR");
-        break;
-      }
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      lcdSetSecondLine("FETCH ISS TLE");
-      while (!foundISSbyWifi && findISSbyWifiAttempts < 3) {
-        findISSbyWifiAttempts++;
-        makeTleApiRequest();
-      }
-
-      lcdSetSecondLine("FETCH DECLINATION");
-      while (!foundDeclinationByWifi && findDeclinationByWifiAttempts < 3) {
-        findDeclinationByWifiAttempts++;
-        makeDeclinationApiRequest();
-      }
-    } else {
-      lcdSetSecondLine("ERROR");
-    }
-  }
-  if (!foundISSbyWifi) {
-    strcpy(tle_line1, "1 25544U 98067A   26122.84497350  .00006801  00000+0  13115-3 0  9991");
-    strcpy(tle_line2, "2 25544  51.6308 164.5377 0007264  16.4817 343.6406 15.49068051564723");
-    lcdSetFirstLine("USING DEFAULT TLE");
-  }
-  if (foundDeclinationByWifi && foundISSbyWifi) {
-    lastWiFiUpdateTime = millis();
-  }
-  parseISSTLE(tle_line1, tle_line2, satrec);
-  lcdSetSecondLine("DATA PARSED");
-  delay(2000);
-  lcdClear();
 
   // Magnometer Initialization
   lcdSetFirstLine("QMC5883L INIT");
@@ -1619,4 +1622,3 @@ void loop() {
     lastLcdUpdateTime = millis();
   }
 }
-
